@@ -26,7 +26,7 @@ use serde::{Deserialize, Deserializer};
 const STABLE_UPDATE_MANIFEST_URL: &str =
     "https://github.com/camiloavelar/herdr/releases/latest/download/latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str =
-    "https://github.com/camiloavelar/herdr/releases/latest/download/preview.json";
+    "https://github.com/camiloavelar/herdr/releases/download/preview/preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
 const HERDR_UPDATE_COMMAND: &str = "herdr update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";

@@ -34,7 +34,7 @@ const CURRENT_PROTOCOL: u32 = crate::protocol::PROTOCOL_VERSION;
 const STABLE_UPDATE_MANIFEST_URL: &str =
     "https://github.com/camiloavelar/herdr/releases/latest/download/latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str =
-    "https://github.com/camiloavelar/herdr/releases/latest/download/preview.json";
+    "https://github.com/camiloavelar/herdr/releases/download/preview/preview.json";
 const REMOTE_BINARY_ENV_VAR: &str = "HERDR_REMOTE_BINARY";
 const REMOTE_OUTPUT_READY_MARKER: &str = "herdr-remote-output-ready:1";
 const WINDOWS_REMOTE_PATH_MARKER: &str = "herdr-remote-path:1:";
