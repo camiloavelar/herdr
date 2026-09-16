@@ -148,7 +148,7 @@ impl ClientShellState {
     }
 
     /// Rect of the agents-panel row for `target` in the last composed frame, if visible.
-    fn agent_row_rect(&self, target: &AgentNavigationTarget) -> Option<Rect> {
+    pub(super) fn agent_row_rect(&self, target: &AgentNavigationTarget) -> Option<Rect> {
         self.hits
             .agents
             .iter()
@@ -166,8 +166,10 @@ impl ClientShellState {
             })
     }
 
-    /// Paints the selected agents-panel row after the sidebar has been rendered.
-    pub(super) fn render_agent_selection(&self, buffer: &mut Buffer) {
+    /// Paints navigation overlays after the sidebar has been rendered: the
+    /// preview origin row, then the selected agents-panel row.
+    pub(super) fn render_navigation_overlays(&self, buffer: &mut Buffer) {
+        self.render_navigation_preview_origin(buffer);
         if self.mode != ClientShellMode::NavigateAgents {
             return;
         }

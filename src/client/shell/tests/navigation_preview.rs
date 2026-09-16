@@ -158,3 +158,92 @@ fn agent_navigation_does_not_preview_when_disabled() {
     let down = state.handle_input_bytes(b"\x1b[B");
     assert!(down.actions.is_empty());
 }
+
+fn workspace_rect(state: &ClientShellState, workspace_id: &str) -> Rect {
+    state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == workspace_id)
+        .map(|hit| hit.rect)
+        .expect("visible workspace row")
+}
+
+fn agent_rect(state: &ClientShellState, pane_id: &str) -> Rect {
+    state
+        .hits
+        .agents
+        .iter()
+        .find(|(_, hit)| hit == pane_id)
+        .map(|(rect, _)| *rect)
+        .expect("visible agent row")
+}
+
+#[test]
+fn workspace_preview_keeps_origin_row_highlighted_after_focus_moves() {
+    let mut state = preview_state(true);
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"w");
+    state.handle_input_bytes(b"\x1b[B");
+
+    // Server applied the preview focus.
+    let mut moved = preview_snapshot();
+    moved.revision = 2;
+    moved.focused_workspace_id = Some("ws_2".into());
+    moved.workspaces[0].focused = false;
+    moved.workspaces[1].focused = true;
+    state.set_snapshot(Box::new(moved));
+    let mut moved_surface = surface();
+    moved_surface.projection_revision = 2;
+    moved_surface.surface_revision = 2;
+    state.set_pane_surface(moved_surface);
+
+    let buffer = state
+        .compose(106, 30)
+        .expect("frame")
+        .to_ratatui_buffer()
+        .unwrap();
+    let palette = &state.config.palette;
+    let origin = workspace_rect(&state, "ws_1");
+    let previewed = workspace_rect(&state, "ws_2");
+    assert_eq!(buffer[(origin.x + 2, origin.y)].bg, palette.active_row_bg);
+    assert_eq!(
+        buffer[(previewed.x + 2, previewed.y)].bg,
+        palette.selection_bg
+    );
+}
+
+#[test]
+fn agent_preview_keeps_origin_row_highlighted_after_focus_moves() {
+    let mut state = preview_state(true);
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"a");
+    state.handle_input_bytes(b"\x1b[B");
+
+    let mut moved = preview_snapshot();
+    moved.revision = 2;
+    moved.focused_pane_id = Some("pane_2".into());
+    moved.panes[0].focused = false;
+    moved.panes[1].focused = true;
+    moved.agents[0].focused = false;
+    moved.agents[1].focused = true;
+    state.set_snapshot(Box::new(moved));
+    let mut moved_surface = surface();
+    moved_surface.projection_revision = 2;
+    moved_surface.surface_revision = 2;
+    state.set_pane_surface(moved_surface);
+
+    let buffer = state
+        .compose(106, 30)
+        .expect("frame")
+        .to_ratatui_buffer()
+        .unwrap();
+    let palette = &state.config.palette;
+    let origin = agent_rect(&state, "pane_1");
+    let previewed = agent_rect(&state, "pane_2");
+    assert_eq!(buffer[(origin.x + 2, origin.y)].bg, palette.active_row_bg);
+    assert_eq!(
+        buffer[(previewed.x + 2, previewed.y)].bg,
+        palette.selection_bg
+    );
+}

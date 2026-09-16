@@ -121,6 +121,54 @@ impl ClientShellState {
         self.focus_or_activate(origin.endpoint_id, target, outcome);
     }
 
+    /// Keeps the row that was focused when navigation started painted as focused
+    /// while a preview has moved the real focus elsewhere.
+    pub(super) fn render_navigation_preview_origin(&self, buffer: &mut Buffer) {
+        if !matches!(
+            self.mode,
+            ClientShellMode::Navigate | ClientShellMode::NavigateAgents
+        ) {
+            return;
+        }
+        let Some(origin) = self.navigation_preview_origin.as_ref() else {
+            return;
+        };
+        if !origin.previewed {
+            return;
+        }
+        let rect = match &origin.restore {
+            NavigationPreviewRestore::Workspace(workspace_id) => {
+                if self
+                    .navigate_workspace_id
+                    .as_ref()
+                    .is_some_and(|target| target.matches(&origin.endpoint_id, workspace_id))
+                {
+                    return;
+                }
+                self.hits
+                    .workspaces
+                    .iter()
+                    .find(|hit| {
+                        hit.endpoint_id == origin.endpoint_id && &hit.workspace_id == workspace_id
+                    })
+                    .map(|hit| hit.rect)
+            }
+            NavigationPreviewRestore::Pane(pane_id) => {
+                let target = AgentNavigationTarget {
+                    endpoint_id: origin.endpoint_id.clone(),
+                    pane_id: pane_id.clone(),
+                };
+                if self.navigate_agent.as_ref() == Some(&target) {
+                    return;
+                }
+                self.agent_row_rect(&target)
+            }
+        };
+        if let Some(rect) = rect {
+            buffer.set_style(rect, Style::default().bg(self.config.palette.active_row_bg));
+        }
+    }
+
     /// Enter keeps the previewed focus; forget the origin.
     pub(super) fn commit_navigation_preview(&mut self) {
         self.navigation_preview_origin = None;
