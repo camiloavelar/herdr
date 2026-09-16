@@ -247,3 +247,76 @@ fn agent_preview_keeps_origin_row_highlighted_after_focus_moves() {
         palette.selection_bg
     );
 }
+
+fn done_agent_state() -> ClientShellState {
+    let mut state = preview_state(true);
+    let mut completed = preview_snapshot();
+    completed.revision = 2;
+    completed.agents[1].agent_status = AgentStatus::Done;
+    completed.agents[1].state_change_seq = 3;
+    state.set_snapshot(Box::new(completed));
+    let mut completed_surface = surface();
+    completed_surface.projection_revision = 2;
+    completed_surface.surface_revision = 2;
+    state.set_pane_surface(completed_surface);
+    assert_eq!(agent_status(&state, "pane_2"), AgentStatus::Done);
+    state
+}
+
+fn agent_status(state: &ClientShellState, pane_id: &str) -> AgentStatus {
+    state
+        .snapshot
+        .as_deref()
+        .and_then(|snapshot| {
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane_id)
+                .map(|agent| agent.agent_status)
+        })
+        .expect("agent")
+}
+
+/// Simulates the server moving focus to the previewed pane and presenting it.
+fn present_previewed_pane(state: &mut ClientShellState) {
+    let mut moved = preview_snapshot();
+    moved.revision = 3;
+    moved.focused_pane_id = Some("pane_2".into());
+    moved.panes[0].focused = false;
+    moved.panes[1].focused = true;
+    moved.agents[0].focused = false;
+    moved.agents[1].focused = true;
+    moved.agents[1].agent_status = AgentStatus::Done;
+    moved.agents[1].state_change_seq = 3;
+    state.set_snapshot(Box::new(moved));
+    let mut moved_surface = surface();
+    moved_surface.projection_revision = 3;
+    moved_surface.surface_revision = 3;
+    moved_surface.panes[0].pane_id = "pane_2".into();
+    state.set_pane_surface(moved_surface);
+}
+
+#[test]
+fn agent_preview_does_not_mark_the_previewed_agent_seen() {
+    let mut state = done_agent_state();
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"a");
+    state.handle_input_bytes(b"\x1b[B");
+    present_previewed_pane(&mut state);
+    assert_eq!(agent_status(&state, "pane_2"), AgentStatus::Done);
+
+    state.handle_input_bytes(b"\x1b");
+    assert_eq!(agent_status(&state, "pane_2"), AgentStatus::Done);
+}
+
+#[test]
+fn agent_preview_enter_marks_the_previewed_agent_seen() {
+    let mut state = done_agent_state();
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"a");
+    state.handle_input_bytes(b"\x1b[B");
+    present_previewed_pane(&mut state);
+
+    state.handle_input_bytes(b"\r");
+    assert_eq!(agent_status(&state, "pane_2"), AgentStatus::Idle);
+}

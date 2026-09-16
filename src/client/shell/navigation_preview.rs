@@ -169,8 +169,21 @@ impl ClientShellState {
         }
     }
 
-    /// Enter keeps the previewed focus; forget the origin.
+    /// True while a preview focus is showing a pane the user has not accepted yet.
+    /// Presenting a previewed pane must not mark its agent as seen.
+    pub(super) fn navigation_preview_active(&self) -> bool {
+        self.navigation_preview_origin
+            .as_ref()
+            .is_some_and(|origin| origin.previewed)
+    }
+
+    /// Enter keeps the previewed focus; forget the origin and acknowledge what is on screen.
     pub(super) fn commit_navigation_preview(&mut self) {
-        self.navigation_preview_origin = None;
+        if self.navigation_preview_origin.take().is_none() {
+            return;
+        }
+        if let Some(surface) = self.pane_surface.clone() {
+            self.acknowledge_active_surface_agents(&surface);
+        }
     }
 }

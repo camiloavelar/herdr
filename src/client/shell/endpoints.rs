@@ -534,7 +534,10 @@ impl ClientShellState {
         self.endpoints[index]
             .agent_presentation
             .project_snapshot(&mut snapshot);
-        let presented_surface = if acknowledge_surface && endpoint_id == &self.active_endpoint_id {
+        let presented_surface = if acknowledge_surface
+            && !self.navigation_preview_active()
+            && endpoint_id == &self.active_endpoint_id
+        {
             self.pane_surface.as_ref()
         } else {
             None
@@ -611,6 +614,9 @@ impl ClientShellState {
     }
 
     pub(crate) fn acknowledge_active_surface_agents(&mut self, surface: &PaneSurfaceFrame) -> bool {
+        if self.navigation_preview_active() {
+            return false;
+        }
         let Some(index) = self
             .endpoints
             .iter()
