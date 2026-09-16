@@ -1,0 +1,5 @@
+rust 1.96.1
+zig 0.16.0
+just 1.58.0
+ubi:cargo-bins/cargo-binstall 1.23.0
+cargo:cargo-nextest 0.9.144
