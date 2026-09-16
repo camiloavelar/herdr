@@ -203,3 +203,69 @@ fn grouped_rows_move_a_lone_state_icon_onto_the_next_row() {
     );
     assert_eq!(lines[1], "idle", "{lines:?}");
 }
+
+/// Raw order: pane_1 (ws_1 idle), pane_2 (ws_2 blocked), pane_3 (ws_1 working),
+/// pane_4 (ws_2 idle). Display order: pane_2, pane_4, pane_3, pane_1.
+fn grouped_priority_state() -> ClientShellState {
+    let mut snap = two_spaces();
+    for (pane_id, workspace, tab) in [("pane_3", "ws_1", "tab_1"), ("pane_4", "ws_2", "tab_2")] {
+        let mut pane = snap.panes[0].clone();
+        pane.pane_id = pane_id.into();
+        pane.workspace_id = workspace.into();
+        pane.tab_id = tab.into();
+        pane.focused = false;
+        snap.panes.push(pane);
+        snap.agents.push(agent(pane_id, workspace, tab));
+    }
+    snap.agents[1].agent_status = AgentStatus::Blocked;
+    snap.agents[1].state_change_seq = 2;
+    snap.agents[2].agent_status = AgentStatus::Working;
+    snap.agents[2].state_change_seq = 3;
+    let config: Config =
+        toml::from_str("[ui.sidebar.agents]\ngroup_by_space = true\nrows = [[\"state_text\"]]\n")
+            .expect("config");
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("frame");
+    state
+}
+
+#[test]
+fn agent_navigation_follows_the_grouped_display_order() {
+    let mut state = grouped_priority_state();
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"a");
+    let selected = |state: &ClientShellState| {
+        state
+            .navigate_agent
+            .as_ref()
+            .map(|target| target.pane_id.clone())
+    };
+    assert_eq!(selected(&state).as_deref(), Some("pane_1"));
+    state.handle_input_bytes(b"\x1b[A");
+    assert_eq!(selected(&state).as_deref(), Some("pane_3"));
+    state.handle_input_bytes(b"\x1b[A");
+    assert_eq!(selected(&state).as_deref(), Some("pane_4"));
+    state.handle_input_bytes(b"\x1b[B");
+    assert_eq!(selected(&state).as_deref(), Some("pane_3"));
+}
+
+#[test]
+fn previous_agent_follows_the_grouped_display_order() {
+    let mut state = grouped_priority_state();
+    let mut previous = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::PreviousAgent),
+        &mut previous,
+    );
+    assert!(
+        matches!(
+            &previous.actions[..],
+            [ClientShellAction::Endpoint { request, .. }]
+                if matches!(&request.method, crate::api::schema::Method::PaneFocus(t) if t.pane_id == "pane_3")
+        ),
+        "{:?}",
+        previous.actions
+    );
+}

@@ -25,10 +25,10 @@ pub(super) fn status_bar_segments(
 
 impl ClientShellState {
     fn agent_navigation_targets(&self) -> Vec<AgentNavigationTarget> {
-        super::aggregate_navigation::online_agent_targets(
+        super::agent_groups::displayed_agent_targets(
             &self.endpoints,
             &self.active_endpoint_id,
-            self.config.agent_panel_sort,
+            &self.config,
         )
         .into_iter()
         .map(|target| AgentNavigationTarget {

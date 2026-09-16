@@ -67,29 +67,14 @@ pub(super) fn render_expanded(
         rows,
         config,
         |row| {
-            let endpoint = endpoints
-                .iter()
-                .find(|endpoint| endpoint.endpoint_id == row.endpoint_id)?;
-            let (workspace_id, label) = super::agent_groups::workspace_group(
-                endpoint.snapshot.as_deref()?,
+            super::agent_groups::endpoint_group(
+                endpoints,
+                &row.endpoint_id,
                 &row.agent.pane_id,
-            )?;
-            let key = format!("{:?}/{workspace_id}", row.endpoint_id);
-            let label = if federated {
-                format!("{} · {label}", row.machine_label)
-            } else {
-                label
-            };
-            Some((key, label))
+                federated,
+            )
         },
-        |row| {
-            endpoints
-                .iter()
-                .find(|endpoint| endpoint.endpoint_id == row.endpoint_id)
-                .and_then(|endpoint| endpoint.snapshot.as_deref())
-                .map(|snapshot| super::agent_groups::agent_rank(snapshot, &row.agent.pane_id))
-                .unwrap_or_default()
-        },
+        |row| super::agent_groups::endpoint_rank(endpoints, &row.endpoint_id, &row.agent.pane_id),
     );
     super::agent_sidebar::render_agent_list(
         buffer,

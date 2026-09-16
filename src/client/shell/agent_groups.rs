@@ -146,3 +146,81 @@ pub(super) fn merge_lone_icon_rows(
     }
     merged
 }
+
+/// Group key/label for an agent of one machine: the space, prefixed with the
+/// machine label when several machines are shown.
+pub(super) fn endpoint_group(
+    endpoints: &[ClientShellEndpoint],
+    endpoint_id: &ClientEndpointId,
+    pane_id: &str,
+    federated: bool,
+) -> Option<(String, String)> {
+    let endpoint = endpoints
+        .iter()
+        .find(|endpoint| &endpoint.endpoint_id == endpoint_id)?;
+    let (workspace_id, label) = workspace_group(endpoint.snapshot.as_deref()?, pane_id)?;
+    let key = format!("{endpoint_id:?}/{workspace_id}");
+    let label = if federated {
+        format!("{} · {label}", endpoint.label)
+    } else {
+        label
+    };
+    Some((key, label))
+}
+
+pub(super) fn endpoint_rank(
+    endpoints: &[ClientShellEndpoint],
+    endpoint_id: &ClientEndpointId,
+    pane_id: &str,
+) -> AgentRank {
+    endpoints
+        .iter()
+        .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        .and_then(|endpoint| endpoint.snapshot.as_deref())
+        .map(|snapshot| agent_rank(snapshot, pane_id))
+        .unwrap_or_default()
+}
+
+fn agents_only<R>(items: Vec<AgentPanelItem<R>>) -> Vec<R> {
+    items
+        .into_iter()
+        .filter_map(|item| match item {
+            AgentPanelItem::Agent(row) => Some(row),
+            AgentPanelItem::Header { .. } => None,
+        })
+        .collect()
+}
+
+/// Pane ids in the order the local agents panel displays them.
+pub(super) fn displayed_agent_pane_ids(
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+) -> Vec<String> {
+    let ids = super::agent_sidebar::ordered_agent_pane_ids(snapshot, config.agent_panel_sort);
+    agents_only(group_items(
+        ids,
+        config,
+        |pane_id| workspace_group(snapshot, pane_id),
+        |pane_id| agent_rank(snapshot, pane_id),
+    ))
+}
+
+/// Online agent targets in the order the agents panel displays them.
+pub(super) fn displayed_agent_targets(
+    endpoints: &[ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
+    config: &ClientShellConfig,
+) -> Vec<super::aggregate_navigation::AggregateAgentTarget> {
+    let targets = super::aggregate_navigation::online_agent_targets(
+        endpoints,
+        active_endpoint_id,
+        config.agent_panel_sort,
+    );
+    let federated = endpoints.len() > 1;
+    agents_only(group_items(
+        targets,
+        config,
+        |target| endpoint_group(endpoints, &target.endpoint_id, &target.pane_id, federated),
+        |target| endpoint_rank(endpoints, &target.endpoint_id, &target.pane_id),
+    ))
+}
