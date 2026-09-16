@@ -68,10 +68,13 @@ pub(super) fn render_agent_panel(
     }
 
     let rows = agent_rows(snapshot, config, None);
+    let items = super::agent_groups::group_items(rows, config, |row| {
+        super::agent_groups::workspace_group(snapshot, &row.pane_id)
+    });
     render_agent_list(
         buffer,
         area,
-        &rows,
+        &items,
         snapshot
             .agent_view_label
             .as_ref()
@@ -79,10 +82,22 @@ pub(super) fn render_agent_panel(
         config,
         agent_scroll,
         hits,
-        |row| row.rows.len(),
-        |buffer, rect, row, hits| {
-            hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+        |item| item.lines(|row| row.rows.len()),
+        |buffer, rect, item, hits| match item {
+            super::agent_groups::AgentPanelItem::Header {
+                label,
+                leading_blank,
+            } => super::agent_groups::render_group_header(
+                buffer,
+                rect,
+                label,
+                *leading_blank,
+                config,
+            ),
+            super::agent_groups::AgentPanelItem::Agent(row) => {
+                hits.agents.push((rect, row.pane_id.clone()));
+                render_agent_row(buffer, rect, row, config);
+            }
         },
     );
 }

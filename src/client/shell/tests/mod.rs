@@ -5,6 +5,7 @@ use crate::protocol::{
     PaneSurfaceSplit, PaneSurfaceSplitDirection, SurfaceRect,
 };
 use crossterm::event::MouseEvent;
+mod agent_groups;
 mod agent_navigation;
 mod last_targets;
 mod navigation_preview;
