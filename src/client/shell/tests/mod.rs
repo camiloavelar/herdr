@@ -6,6 +6,7 @@ use crate::protocol::{
 };
 use crossterm::event::MouseEvent;
 mod agent_navigation;
+mod last_targets;
 mod navigation_preview;
 mod sidebar_divider;
 mod text_editing;

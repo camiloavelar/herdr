@@ -360,6 +360,8 @@ pub struct Keybinds {
     pub cycle_pane_next: ActionKeybinds,
     pub cycle_pane_previous: ActionKeybinds,
     pub last_pane: ActionKeybinds,
+    pub last_workspace: ActionKeybinds,
+    pub last_tab: ActionKeybinds,
     pub split_vertical: ActionKeybinds,
     pub split_horizontal: ActionKeybinds,
     pub close_pane: ActionKeybinds,
@@ -529,6 +531,8 @@ impl Config {
             cycle_pane_next: empty_action!(),
             cycle_pane_previous: empty_action!(),
             last_pane: empty_action!(),
+            last_workspace: empty_action!(),
+            last_tab: empty_action!(),
             split_vertical: empty_action!(),
             split_horizontal: empty_action!(),
             close_pane: empty_action!(),
@@ -675,6 +679,8 @@ impl Config {
             apply_action!(keybinds.swap_pane_up, swap_pane_up, source);
             apply_action!(keybinds.swap_pane_right, swap_pane_right, source);
             apply_action!(keybinds.last_pane, last_pane, source);
+            apply_action!(keybinds.last_workspace, last_workspace, source);
+            apply_action!(keybinds.last_tab, last_tab, source);
             apply_action!(keybinds.cycle_pane_next, cycle_pane_next, source);
             apply_action!(keybinds.cycle_pane_previous, cycle_pane_previous, source);
             apply_action!(keybinds.split_vertical, split_vertical, source);
@@ -1036,7 +1042,11 @@ fn reject_binding(
     diagnostics: &mut Vec<String>,
     source: BindingSource,
 ) -> bool {
-    if binding.trigger.is_prefix() && registry.prefix_rhs_is_reserved(binding.trigger.combo()) {
+    // Fork: a user binding on the doubled prefix is honored; only defaults are reserved.
+    if source == BindingSource::Default
+        && binding.trigger.is_prefix()
+        && registry.prefix_rhs_is_reserved(binding.trigger.combo())
+    {
         if source == BindingSource::Default && registry.prefix_source == BindingSource::User {
             return true;
         }
@@ -1793,7 +1803,9 @@ close_tab = "X"
     }
 
     #[test]
-    fn prefix_rhs_equal_to_configured_prefix_is_rejected() {
+    fn prefix_rhs_equal_to_configured_prefix_is_kept() {
+        // Fork: like tmux, an explicit user binding on the doubled prefix replaces
+        // "send a literal prefix key". Defaults never claim it.
         let config: Config = toml::from_str(
             r#"
 [keys]
@@ -1803,22 +1815,10 @@ help = "prefix+ctrl+a"
         )
         .unwrap();
         let diagnostics = config.collect_diagnostics();
-        assert!(config.keybinds().help.bindings.is_empty());
-        assert!(diagnostics.iter().any(|diag| {
-            diag.contains("reserved keybinding")
-                && diag.contains("keys.help")
-                && diag.contains("keys.prefix")
-        }));
-
-        let config: Config = toml::from_str(
-            r#"
-[keys]
-prefix = "ctrl+a"
-help = "prefix+ctrl+b"
-"#,
-        )
-        .unwrap();
-        assert!(!config.keybinds().help.bindings.is_empty());
+        assert_eq!(config.keybinds().help.bindings.len(), 1);
+        assert!(!diagnostics
+            .iter()
+            .any(|diag| diag.contains("reserved keybinding")));
     }
 
     #[test]
@@ -1950,7 +1950,9 @@ navigate_workspace_down = "ctrl+a"
     }
 
     #[test]
-    fn custom_command_prefix_rhs_equal_to_configured_prefix_is_rejected() {
+    fn custom_command_prefix_rhs_equal_to_configured_prefix_is_kept() {
+        // Fork: like tmux, an explicit user binding on the doubled prefix replaces
+        // "send a literal prefix key".
         let config: Config = toml::from_str(
             r#"
 [keys]
@@ -1963,10 +1965,10 @@ command = "echo no"
         )
         .unwrap();
         let diagnostics = config.collect_diagnostics();
-        assert!(config.keybinds().custom_commands.is_empty());
-        assert!(diagnostics.iter().any(|diag| {
-            diag.contains("reserved keybinding") && diag.contains("keys.command[0].key")
-        }));
+        assert_eq!(config.keybinds().custom_commands.len(), 1);
+        assert!(!diagnostics
+            .iter()
+            .any(|diag| diag.contains("reserved keybinding")));
     }
 
     #[test]

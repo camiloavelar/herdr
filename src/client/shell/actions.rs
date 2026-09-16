@@ -172,6 +172,13 @@ impl ClientShellState {
                     self.push_endpoint_method(method, outcome);
                     return;
                 }
+                if matches!(
+                    action,
+                    crate::input::KeybindAction::LastWorkspace
+                        | crate::input::KeybindAction::LastTab
+                ) {
+                    return; // client-side history only; nothing to do without a target
+                }
                 outcome.actions.push(ClientShellAction::Keybind(action));
             }
             crate::input::KeybindMatch::Command(command) => {
@@ -1065,6 +1072,8 @@ impl ClientShellState {
                     pane_id: pane_id.clone(),
                 }))
             }
+            KeybindAction::LastWorkspace => self.last_workspace_method(snapshot),
+            KeybindAction::LastTab => self.last_tab_method(snapshot),
             KeybindAction::Zoom => Some(Method::PaneZoom(PaneZoomParams {
                 pane_id: focused_pane,
                 mode: PaneZoomMode::Toggle,

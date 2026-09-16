@@ -776,6 +776,18 @@
           "description": "Focus the last focused pane across workspaces and tabs. Unset by default."
         },
         {
+          "key": "keys.last_workspace",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Toggle to the previously focused space. Unset by default."
+        },
+        {
+          "key": "keys.last_tab",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Toggle to the previously focused tab of the current space. Unset by default."
+        },
+        {
           "key": "keys.split_vertical",
           "type": "keybinding",
           "default": "\"prefix+v\"",

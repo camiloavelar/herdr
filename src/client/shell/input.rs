@@ -581,7 +581,10 @@ impl ClientShellState {
                 } else {
                     ClientShellMode::Terminal
                 };
-                if crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix) {
+                if crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
+                    && crate::input::resolve_prefix_binding(&self.config.keybinds.keybinds, key)
+                        .is_none()
+                {
                     self.mode = return_mode;
                     outcome.repaint = true;
                     return self.focused_pane_id().map(ClientInputTarget::Pane);

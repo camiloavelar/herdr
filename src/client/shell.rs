@@ -9,6 +9,8 @@ mod agent_navigation;
 use agent_navigation::AgentNavigationTarget;
 mod navigation_preview;
 use navigation_preview::NavigationPreviewOrigin;
+mod last_targets;
+use last_targets::LastTargets;
 mod composition;
 mod config;
 mod context_menu;
