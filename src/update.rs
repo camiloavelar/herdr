@@ -22,8 +22,11 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::Stream as _;
 use serde::{Deserialize, Deserializer};
 
-const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
-const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
+// Fork: update manifests are published as release assets of camiloavelar/herdr.
+const STABLE_UPDATE_MANIFEST_URL: &str =
+    "https://github.com/camiloavelar/herdr/releases/latest/download/latest.json";
+const PREVIEW_UPDATE_MANIFEST_URL: &str =
+    "https://github.com/camiloavelar/herdr/releases/latest/download/preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
 const HERDR_UPDATE_COMMAND: &str = "herdr update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";
