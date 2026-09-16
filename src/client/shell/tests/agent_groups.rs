@@ -124,3 +124,56 @@ rows = [["state_text"]]
     let lines = body_lines(&mut state);
     assert_eq!(&lines[..3], ["idle", "idle", ""], "{lines:?}");
 }
+
+#[test]
+fn grouped_rows_drop_the_workspace_token_but_priority_mode_keeps_it() {
+    let rows = r#"rows = [["workspace"], ["state_text"]]"#;
+    let mut grouped = state_with(&format!(
+        "[ui.sidebar.agents]\ngroup_by_space = true\n{rows}\n"
+    ));
+    let lines = body_lines(&mut grouped);
+    assert_eq!(
+        &lines[..5],
+        ["client-shell", "idle", "", "second", "idle"],
+        "{lines:?}"
+    );
+
+    let mut priority = state_with(&format!(
+        "[ui]\nagent_panel_sort = \"priority\"\n\n[ui.sidebar.agents]\ngroup_by_space = true\n{rows}\n"
+    ));
+    let lines = body_lines(&mut priority);
+    assert_eq!(
+        &lines[..4],
+        ["client-shell", "idle", "second", "idle"],
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn grouped_rows_are_ordered_by_priority_within_and_across_spaces() {
+    let mut snap = two_spaces();
+    // ws_1 gains a working agent; ws_2's agent is blocked, so ws_2 comes first.
+    let mut pane_3 = snap.panes[0].clone();
+    pane_3.pane_id = "pane_3".into();
+    pane_3.focused = false;
+    snap.panes.push(pane_3);
+    let mut working = agent("pane_3", "ws_1", "tab_1");
+    working.agent_status = AgentStatus::Working;
+    working.state_change_seq = 3;
+    snap.agents.push(working);
+    snap.agents[1].agent_status = AgentStatus::Blocked;
+    snap.agents[1].state_change_seq = 2;
+
+    let config: Config =
+        toml::from_str("[ui.sidebar.agents]\ngroup_by_space = true\nrows = [[\"state_text\"]]\n")
+            .expect("config");
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    let lines = body_lines(&mut state);
+    assert_eq!(
+        &lines[..6],
+        ["second", "blocked", "", "client-shell", "working", "idle"],
+        "{lines:?}"
+    );
+}

@@ -28,6 +28,7 @@ pub(super) fn group_items<R>(
     rows: Vec<R>,
     config: &ClientShellConfig,
     group_of: impl Fn(&R) -> Option<(String, String)>,
+    rank_of: impl Fn(&R) -> AgentRank,
 ) -> Vec<AgentPanelItem<R>> {
     if !grouping_enabled(config) {
         return rows.into_iter().map(AgentPanelItem::Agent).collect();
@@ -46,6 +47,12 @@ pub(super) fn group_items<R>(
             None => groups.push((key, label, vec![row])),
         }
     }
+    // Same ranking as the priority ordering, inside each space and across spaces
+    // (a space sorts by its most urgent agent). Stable, so ties keep space order.
+    for group in &mut groups {
+        group.2.sort_by_key(|row| std::cmp::Reverse(rank_of(row)));
+    }
+    groups.sort_by_key(|group| std::cmp::Reverse(group.2.first().map(&rank_of)));
     let mut items = Vec::new();
     for (index, (key, label, rows)) in groups.into_iter().enumerate() {
         if key.is_some() {
@@ -57,6 +64,23 @@ pub(super) fn group_items<R>(
         items.extend(rows.into_iter().map(AgentPanelItem::Agent));
     }
     items
+}
+
+/// Priority-mode ranking: status urgency first, then most recent state change.
+pub(super) type AgentRank = (u8, u64);
+
+pub(super) fn agent_rank(snapshot: &ClientShellSnapshot, pane_id: &str) -> AgentRank {
+    snapshot
+        .agents
+        .iter()
+        .find(|agent| agent.pane_id == pane_id)
+        .map(|agent| {
+            (
+                super::status_priority(agent.agent_status),
+                agent.state_change_seq,
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// Space (key, label) of the agent living in `pane_id`.

@@ -68,9 +68,12 @@ pub(super) fn render_agent_panel(
     }
 
     let rows = agent_rows(snapshot, config, None);
-    let items = super::agent_groups::group_items(rows, config, |row| {
-        super::agent_groups::workspace_group(snapshot, &row.pane_id)
-    });
+    let items = super::agent_groups::group_items(
+        rows,
+        config,
+        |row| super::agent_groups::workspace_group(snapshot, &row.pane_id),
+        |row| super::agent_groups::agent_rank(snapshot, &row.pane_id),
+    );
     render_agent_list(
         buffer,
         area,
@@ -310,8 +313,12 @@ pub(super) fn agent_row(
     let rows = crate::ui::sidebar_agent_rows(
         &config.agents,
         crate::ui::AgentTokenContext {
-            machine,
-            workspace: &workspace.label,
+            machine: machine.filter(|_| !super::agent_groups::grouping_enabled(config)),
+            workspace: if super::agent_groups::grouping_enabled(config) {
+                ""
+            } else {
+                &workspace.label
+            },
             tab: tab_label,
             pane: agent
                 .title

@@ -63,22 +63,34 @@ pub(super) fn render_expanded(
     }
     let rows = agent_rows(endpoints, active_endpoint_id, config);
     let federated = endpoints.len() > 1;
-    let items = super::agent_groups::group_items(rows, config, |row| {
-        let endpoint = endpoints
-            .iter()
-            .find(|endpoint| endpoint.endpoint_id == row.endpoint_id)?;
-        let (workspace_id, label) = super::agent_groups::workspace_group(
-            endpoint.snapshot.as_deref()?,
-            &row.agent.pane_id,
-        )?;
-        let key = format!("{:?}/{workspace_id}", row.endpoint_id);
-        let label = if federated {
-            format!("{} · {label}", row.machine_label)
-        } else {
-            label
-        };
-        Some((key, label))
-    });
+    let items = super::agent_groups::group_items(
+        rows,
+        config,
+        |row| {
+            let endpoint = endpoints
+                .iter()
+                .find(|endpoint| endpoint.endpoint_id == row.endpoint_id)?;
+            let (workspace_id, label) = super::agent_groups::workspace_group(
+                endpoint.snapshot.as_deref()?,
+                &row.agent.pane_id,
+            )?;
+            let key = format!("{:?}/{workspace_id}", row.endpoint_id);
+            let label = if federated {
+                format!("{} · {label}", row.machine_label)
+            } else {
+                label
+            };
+            Some((key, label))
+        },
+        |row| {
+            endpoints
+                .iter()
+                .find(|endpoint| endpoint.endpoint_id == row.endpoint_id)
+                .and_then(|endpoint| endpoint.snapshot.as_deref())
+                .map(|snapshot| super::agent_groups::agent_rank(snapshot, &row.agent.pane_id))
+                .unwrap_or_default()
+        },
+    );
     super::agent_sidebar::render_agent_list(
         buffer,
         area,

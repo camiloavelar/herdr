@@ -85,9 +85,8 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Machine => context
                             .machine
                             .map(|value| ResolvedTokenKind::Machine(value.to_string())),
-                        AgentSidebarToken::Workspace => {
-                            Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
-                        }
+                        AgentSidebarToken::Workspace => (!context.workspace.is_empty())
+                            .then(|| ResolvedTokenKind::Workspace(context.workspace.to_string())),
                         AgentSidebarToken::Tab => context
                             .tab
                             .map(|value| ResolvedTokenKind::Tab(value.to_string())),
