@@ -1,14 +1,23 @@
 name: Fork Release
 
-# Fork-only release pipeline for camiloavelar/herdr. Builds Linux and macOS
-# binaries on a `v*` tag, publishes them as a GitHub release, and attaches a
-# `latest.json` update manifest so `herdr update` and the in-app update check
-# (which point at this repository's latest release) stay on the fork.
+# Fork-only release pipeline for camiloavelar/herdr.
+#
+# - Every push to master builds Linux and macOS preview binaries and publishes
+#   them on the rolling `preview` prerelease together with `preview.json`, so a
+#   client on `herdr channel set preview` picks up each master build.
+# - A `v*` tag builds stable binaries and publishes a GitHub release with
+#   `latest.json`, which `herdr update` on the stable channel reads from
+#   this repository's latest release.
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*"
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
 
 permissions:
   contents: read
@@ -18,7 +27,53 @@ env:
   RUST_TOOLCHAIN_VERSION: 1.96.1
 
 jobs:
+  plan:
+    if: github.repository == 'camiloavelar/herdr'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      channel: ${{ steps.plan.outputs.channel }}
+      build_id: ${{ steps.plan.outputs.build_id }}
+      commit: ${{ steps.plan.outputs.commit }}
+      built_at: ${{ steps.plan.outputs.built_at }}
+      base_version: ${{ steps.plan.outputs.base_version }}
+      protocol: ${{ steps.plan.outputs.protocol }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Plan build
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          protocol="$(python3 -c 'import re; print(re.search(r"pub const PROTOCOL_VERSION: u32 = (\d+);", open("src/protocol/wire.rs").read()).group(1))')"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            channel=stable
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [ "$base_version" != "$tag_version" ]; then
+              echo "error: tag $GITHUB_REF_NAME doesn't match Cargo.toml version $base_version"
+              exit 1
+            fi
+          else
+            channel=preview
+          fi
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          day="$(git show -s --format=%cs HEAD)"
+          {
+            echo "channel=$channel"
+            echo "build_id=$day-$short_sha"
+            echo "commit=$GITHUB_SHA"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "base_version=$base_version"
+            echo "protocol=$protocol"
+          } >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     if: github.repository == 'camiloavelar/herdr'
     permissions:
       contents: read
@@ -42,21 +97,18 @@ jobs:
     env:
       LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
       LIBGHOSTTY_VT_SIMD: 'true'
+      HERDR_BUILD_CHANNEL: ${{ needs.plan.outputs.channel }}
+      HERDR_BUILD_COMMIT: ${{ needs.plan.outputs.commit }}
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
 
-      - name: Verify tag matches Cargo.toml version
+      - name: Set preview build id
+        if: needs.plan.outputs.channel == 'preview'
         shell: bash
-        run: |
-          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
-            echo "error: tag $GITHUB_REF_NAME doesn't match Cargo.toml version $CARGO_VERSION"
-            exit 1
-          fi
+        run: echo "HERDR_BUILD_ID=${{ needs.plan.outputs.build_id }}" >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
@@ -114,8 +166,8 @@ jobs:
           path: ${{ matrix.name }}
 
   release:
-    needs: [build]
-    if: github.repository == 'camiloavelar/herdr'
+    needs: [plan, build]
+    if: github.repository == 'camiloavelar/herdr' && needs.plan.outputs.channel == 'stable'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -132,14 +184,13 @@ jobs:
         shell: bash
         env:
           REPOSITORY: ${{ github.repository }}
+          PROTOCOL: ${{ needs.plan.outputs.protocol }}
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, re, pathlib
+          import hashlib, json, os, pathlib
           tag = os.environ["GITHUB_REF_NAME"]
           version = tag.removeprefix("v")
           repo = os.environ["REPOSITORY"]
-          wire = pathlib.Path("src/protocol/wire.rs").read_text()
-          protocol = int(re.search(r"pub const PROTOCOL_VERSION: u32 = (\d+);", wire).group(1))
           upstream = json.loads(pathlib.Path("distribution/latest.json").read_text())
           names = ["herdr-linux-x86_64", "herdr-linux-aarch64", "herdr-macos-x86_64", "herdr-macos-aarch64"]
           assets, sha256 = {}, {}
@@ -150,7 +201,7 @@ jobs:
               sha256[key] = hashlib.sha256(data).hexdigest()
           manifest = {
               "version": version,
-              "protocol": protocol,
+              "protocol": int(os.environ["PROTOCOL"]),
               "endpoint_generation": upstream.get("endpoint_generation", 1),
               "notes": f"Fork build {tag} of {repo}. See the release page for details.",
               "assets": assets,
@@ -172,3 +223,94 @@ jobs:
             herdr-macos-aarch64/herdr-macos-aarch64
             latest.json
           body: Fork build ${{ github.ref_name }} of ${{ github.repository }}.
+
+  preview-release:
+    needs: [plan, build]
+    if: github.repository == 'camiloavelar/herdr' && needs.plan.outputs.channel == 'preview'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fork-preview-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+
+      - name: Generate preview manifest
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          BUILD_ID: ${{ needs.plan.outputs.build_id }}
+          COMMIT: ${{ needs.plan.outputs.commit }}
+          BUILT_AT: ${{ needs.plan.outputs.built_at }}
+          BASE_VERSION: ${{ needs.plan.outputs.base_version }}
+          PROTOCOL: ${{ needs.plan.outputs.protocol }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          env = os.environ
+          repo = env["REPOSITORY"]
+          upstream = json.loads(pathlib.Path("distribution/latest.json").read_text())
+          names = ["herdr-linux-x86_64", "herdr-linux-aarch64", "herdr-macos-x86_64", "herdr-macos-aarch64"]
+          assets = {}
+          for name in names:
+              key = name.removeprefix("herdr-")
+              data = pathlib.Path(name, name).read_bytes()
+              assets[key] = {
+                  "url": f"https://github.com/{repo}/releases/download/preview/{name}",
+                  "sha256": hashlib.sha256(data).hexdigest(),
+              }
+          build = {
+              "base_version": env["BASE_VERSION"],
+              "commit": env["COMMIT"],
+              "built_at": env["BUILT_AT"],
+              "protocol": int(env["PROTOCOL"]),
+              "endpoint_generation": upstream.get("endpoint_generation", 1),
+              "assets": assets,
+          }
+          manifest = {
+              "schema_version": 1,
+              "channel": "preview",
+              "build_id": env["BUILD_ID"],
+              **build,
+              "notes": f"Fork preview build {env['BUILD_ID']} of {repo} at commit {env['COMMIT']}.",
+              "builds": {env["BUILD_ID"]: build},
+          }
+          pathlib.Path("preview.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print(pathlib.Path("preview.json").read_text())
+          PY
+
+      - name: Move rolling preview tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$REPOSITORY/git/refs/tags/preview" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPOSITORY/git/refs/tags/preview" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$REPOSITORY/git/refs" -f ref=refs/tags/preview -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+      - name: Publish rolling preview release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        with:
+          tag_name: preview
+          name: Preview ${{ needs.plan.outputs.build_id }}
+          prerelease: true
+          files: |
+            herdr-linux-x86_64/herdr-linux-x86_64
+            herdr-linux-aarch64/herdr-linux-aarch64
+            herdr-macos-x86_64/herdr-macos-x86_64
+            herdr-macos-aarch64/herdr-macos-aarch64
+            preview.json
+          body: |
+            Rolling preview build of ${{ github.repository }} master.
+            Build ${{ needs.plan.outputs.build_id }} at commit ${{ needs.plan.outputs.commit }}.
