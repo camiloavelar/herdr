@@ -120,3 +120,29 @@ pub(super) fn render_group_header(
         }
     }
 }
+
+/// With machine/workspace hidden under a group header, a row left holding only
+/// the state icon merges into the following row so the icon still leads a line.
+pub(super) fn merge_lone_icon_rows(
+    rows: Vec<Vec<crate::ui::ResolvedToken>>,
+) -> Vec<Vec<crate::ui::ResolvedToken>> {
+    let mut merged = Vec::with_capacity(rows.len());
+    let mut carry: Vec<crate::ui::ResolvedToken> = Vec::new();
+    for row in rows {
+        let only_icons = !row.is_empty()
+            && row
+                .iter()
+                .all(|token| matches!(token.kind, crate::ui::ResolvedTokenKind::StateIcon));
+        if only_icons {
+            carry.extend(row);
+            continue;
+        }
+        let mut line = std::mem::take(&mut carry);
+        line.extend(row);
+        merged.push(line);
+    }
+    if !carry.is_empty() {
+        merged.push(carry);
+    }
+    merged
+}

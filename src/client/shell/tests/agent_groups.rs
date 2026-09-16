@@ -177,3 +177,29 @@ fn grouped_rows_are_ordered_by_priority_within_and_across_spaces() {
         "{lines:?}"
     );
 }
+
+#[test]
+fn grouped_rows_move_a_lone_state_icon_onto_the_next_row() {
+    let rows = r#"rows = [["state_icon", "workspace"], ["state_text"]]"#;
+    let mut grouped = state_with(&format!(
+        "[ui.sidebar.agents]\ngroup_by_space = true\n{rows}\n"
+    ));
+    let lines = body_lines(&mut grouped);
+    assert_eq!(lines[0], "client-shell", "{lines:?}");
+    assert!(
+        lines[1].ends_with("idle") && lines[1].len() > "idle".len(),
+        "icon should prefix the status row: {lines:?}"
+    );
+    assert_eq!(lines[2], "", "{lines:?}");
+    assert_eq!(lines[3], "second", "{lines:?}");
+
+    let mut priority = state_with(&format!(
+        "[ui]\nagent_panel_sort = \"priority\"\n\n[ui.sidebar.agents]\ngroup_by_space = true\n{rows}\n"
+    ));
+    let lines = body_lines(&mut priority);
+    assert!(
+        lines[0].ends_with("client-shell") && lines[0].len() > "client-shell".len(),
+        "{lines:?}"
+    );
+    assert_eq!(lines[1], "idle", "{lines:?}");
+}

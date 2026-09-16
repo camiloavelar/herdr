@@ -332,6 +332,11 @@ pub(super) fn agent_row(
         },
         state_text,
     );
+    let rows = if super::agent_groups::grouping_enabled(config) {
+        super::agent_groups::merge_lone_icon_rows(rows)
+    } else {
+        rows
+    };
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
         status: agent.agent_status,
