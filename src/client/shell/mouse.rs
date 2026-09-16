@@ -660,6 +660,7 @@ impl ClientShellState {
             && !self.mobile_layout_active()
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
         {
+            self.cancel_navigation_preview(outcome);
             self.mode = self.copy_or_terminal_mode();
             self.navigate_workspace_id = None;
             outcome.repaint = true;

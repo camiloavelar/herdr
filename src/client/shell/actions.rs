@@ -145,6 +145,7 @@ impl ClientShellState {
                     self.reveal_mobile_workspace = false;
                     self.mode = ClientShellMode::Navigate;
                     self.navigate_workspace_id = self.focused_navigation_target();
+                    self.begin_workspace_navigation_preview();
                     self.reveal_navigation_workspace = true;
                     outcome.repaint = true;
                     return;

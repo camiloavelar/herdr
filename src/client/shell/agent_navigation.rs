@@ -52,11 +52,13 @@ impl ClientShellState {
             })
             .or_else(|| targets.first())
             .cloned();
+        self.begin_agent_navigation_preview();
         self.mode = ClientShellMode::NavigateAgents;
         outcome.repaint = true;
     }
 
-    fn leave_agent_navigation(&mut self) {
+    fn leave_agent_navigation(&mut self, outcome: &mut ClientShellInput) {
+        self.cancel_navigation_preview(outcome);
         self.mode = self.copy_or_terminal_mode();
         self.navigate_agent = None;
     }
@@ -85,12 +87,12 @@ impl ClientShellState {
 
     fn accept_navigate_agent(&mut self, outcome: &mut ClientShellInput) {
         let Some(target) = self.navigate_agent.clone() else {
-            self.leave_agent_navigation();
+            self.leave_agent_navigation(outcome);
             outcome.repaint = true;
             return;
         };
         if !self.agent_navigation_targets().contains(&target) {
-            self.leave_agent_navigation();
+            self.leave_agent_navigation(outcome);
             outcome.repaint = true;
             return;
         }
@@ -99,6 +101,7 @@ impl ClientShellState {
             ClientEndpointFocusTarget::Pane(target.pane_id),
             outcome,
         ) {
+            self.commit_navigation_preview();
             self.mode = ClientShellMode::Terminal;
             self.navigate_agent = None;
         }
@@ -113,18 +116,20 @@ impl ClientShellState {
         if key.code == KeyCode::Esc
             || crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
         {
-            self.leave_agent_navigation();
+            self.leave_agent_navigation(outcome);
             outcome.repaint = true;
             return;
         }
         let navigate = &self.config.keybinds.keybinds.navigate;
         if navigate.workspace_up.matches_direct_key(key) {
             self.move_navigate_agent(-1);
+            self.preview_navigate_agent(outcome);
             outcome.repaint = true;
             return;
         }
         if navigate.workspace_down.matches_direct_key(key) {
             self.move_navigate_agent(1);
+            self.preview_navigate_agent(outcome);
             outcome.repaint = true;
             return;
         }
@@ -136,7 +141,7 @@ impl ClientShellState {
         if let Some(binding) =
             crate::input::resolve_prefix_binding(&self.config.keybinds.keybinds, key)
         {
-            self.leave_agent_navigation();
+            self.leave_agent_navigation(outcome);
             outcome.repaint = true;
             self.record_binding(binding, outcome);
         }

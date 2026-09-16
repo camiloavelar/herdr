@@ -7,6 +7,8 @@ mod workspace_navigation;
 use workspace_navigation::WorkspaceNavigationTarget;
 mod agent_navigation;
 use agent_navigation::AgentNavigationTarget;
+mod navigation_preview;
+use navigation_preview::NavigationPreviewOrigin;
 mod composition;
 mod config;
 mod context_menu;

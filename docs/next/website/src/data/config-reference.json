@@ -1035,6 +1035,12 @@
           "description": "Title Herdr writes to the terminal it runs in. Tokens: {hostname}, {workspace}, {tab}, {pane}, {terminal_title}. Empty leaves the outer title alone."
         },
         {
+          "key": "ui.navigation_preview",
+          "type": "bool",
+          "default": "false",
+          "description": "Focus the highlighted space or agent while navigating with the workspace or agent picker; Enter keeps it and Esc restores the original focus."
+        },
+        {
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",

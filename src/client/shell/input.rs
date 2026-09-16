@@ -652,6 +652,7 @@ impl ClientShellState {
         if key.code == KeyCode::Esc
             || crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
         {
+            self.cancel_navigation_preview(outcome);
             self.mode = self.copy_or_terminal_mode();
             self.navigate_workspace_id = None;
             outcome.repaint = true;
@@ -667,6 +668,7 @@ impl ClientShellState {
             .matches_direct_key(key)
         {
             self.move_navigate_workspace(-1);
+            self.preview_navigate_workspace(outcome);
             outcome.repaint = true;
             return;
         }
@@ -679,6 +681,7 @@ impl ClientShellState {
             .matches_direct_key(key)
         {
             self.move_navigate_workspace(1);
+            self.preview_navigate_workspace(outcome);
             outcome.repaint = true;
             return;
         }
@@ -838,6 +841,7 @@ impl ClientShellState {
             self.cycle_pane(true, outcome);
         } else {
             if !preserve_navigate {
+                self.cancel_navigation_preview(outcome);
                 self.mode = ClientShellMode::Terminal;
             }
             self.record_binding(binding, outcome);

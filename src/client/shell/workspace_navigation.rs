@@ -145,6 +145,7 @@ impl ClientShellState {
             ClientEndpointFocusTarget::Workspace(target.workspace_id),
             outcome,
         ) {
+            self.commit_navigation_preview();
             self.mode = ClientShellMode::Terminal;
             self.navigate_workspace_id = None;
         }
