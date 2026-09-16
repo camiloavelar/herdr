@@ -81,7 +81,7 @@ impl ClientShellState {
     pub(crate) fn host_keyboard_report_all_requested(&self) -> bool {
         matches!(
             self.mode,
-            ClientShellMode::Prefix | ClientShellMode::Navigate
+            ClientShellMode::Prefix | ClientShellMode::Navigate | ClientShellMode::NavigateAgents
         )
     }
 
@@ -605,6 +605,10 @@ impl ClientShellState {
             }
             ClientShellMode::Navigate => {
                 self.route_navigate_key(key, outcome);
+                None
+            }
+            ClientShellMode::NavigateAgents => {
+                self.route_navigate_agents_key(key, outcome);
                 None
             }
             ClientShellMode::Resize => {

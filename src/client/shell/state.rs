@@ -267,6 +267,7 @@ pub(super) enum ClientShellMode {
     Terminal,
     Prefix,
     Navigate,
+    NavigateAgents,
     Resize,
     Copy,
 }
@@ -877,6 +878,7 @@ pub(crate) struct ClientShellState {
     pub(super) collapsed_endpoints: HashSet<ClientEndpointId>,
     pub(super) mode: ClientShellMode,
     pub(super) navigate_workspace_id: Option<WorkspaceNavigationTarget>,
+    pub(super) navigate_agent: Option<AgentNavigationTarget>,
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
@@ -1039,6 +1041,7 @@ impl ClientShellState {
             collapsed_endpoints: HashSet::new(),
             mode: ClientShellMode::Terminal,
             navigate_workspace_id: None,
+            navigate_agent: None,
             reveal_navigation_workspace: false,
             overlay,
             previous_pane_id: None,

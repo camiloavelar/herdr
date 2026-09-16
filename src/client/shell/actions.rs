@@ -149,6 +149,10 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if action == crate::input::KeybindAction::AgentPicker {
+                    self.enter_agent_navigation(outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::EnterResizeMode {
                     self.mode = ClientShellMode::Resize;
                     outcome.repaint = true;

@@ -89,6 +89,7 @@ impl ClientShellState {
                 &mut self.hits,
             );
         }
+        self.render_agent_selection(&mut buffer);
         if !self.config.mouse_capture {
             self.hits = ShellHitMap::default();
         }
@@ -206,6 +207,7 @@ impl ClientShellState {
                 workspace_drop_indicator_row,
             },
         );
+        self.render_agent_selection(&mut buffer);
         self.hits.panes = surface
             .panes
             .iter()

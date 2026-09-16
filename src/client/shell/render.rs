@@ -109,6 +109,11 @@ pub(super) fn render_mode_bar(
                     (" keybinds".to_owned(), base),
                 ]);
             }
+            ClientShellMode::NavigateAgents => {
+                segments.extend(super::agent_navigation::status_bar_segments(
+                    mode_style, base, key,
+                ));
+            }
             ClientShellMode::Resize => {
                 segments.extend([
                     (" RESIZE ".to_owned(), mode_style),
