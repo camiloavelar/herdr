@@ -1,0 +1,9 @@
+# Fork-only nextest settings (camiloavelar/herdr).
+#
+# The remote bridge tests drive a 300ms idle deadline with real sleeps, so a
+# stalled CI runner can expire the bridge between steps and fail with
+# BrokenPipe. Retry them instead of letting runner load fail the build; a
+# real regression still fails every attempt.
+[[profile.default.overrides]]
+filter = 'test(/^platform::remote_bridge_tests::/)'
+retries = 2
