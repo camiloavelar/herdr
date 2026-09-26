@@ -250,15 +250,18 @@ fn agent_preview_keeps_origin_row_highlighted_after_focus_moves() {
 
 fn done_agent_state() -> ClientShellState {
     let mut state = preview_state(true);
-    let mut completed = preview_snapshot();
-    completed.revision = 2;
-    completed.agents[1].agent_status = AgentStatus::Done;
-    completed.agents[1].state_change_seq = 3;
-    state.set_snapshot(Box::new(completed));
-    let mut completed_surface = surface();
-    completed_surface.projection_revision = 2;
-    completed_surface.surface_revision = 2;
-    state.set_pane_surface(completed_surface);
+    // Done only projects for an agent that was observed working first.
+    for (revision, status, seq) in [(2, AgentStatus::Working, 2), (3, AgentStatus::Done, 3)] {
+        let mut next = preview_snapshot();
+        next.revision = revision;
+        next.agents[1].agent_status = status;
+        next.agents[1].state_change_seq = seq;
+        state.set_snapshot(Box::new(next));
+        let mut next_surface = surface();
+        next_surface.projection_revision = revision;
+        next_surface.surface_revision = revision;
+        state.set_pane_surface(next_surface);
+    }
     assert_eq!(agent_status(&state, "pane_2"), AgentStatus::Done);
     state
 }
@@ -280,7 +283,7 @@ fn agent_status(state: &ClientShellState, pane_id: &str) -> AgentStatus {
 /// Simulates the server moving focus to the previewed pane and presenting it.
 fn present_previewed_pane(state: &mut ClientShellState) {
     let mut moved = preview_snapshot();
-    moved.revision = 3;
+    moved.revision = 4;
     moved.focused_pane_id = Some("pane_2".into());
     moved.panes[0].focused = false;
     moved.panes[1].focused = true;
@@ -290,8 +293,8 @@ fn present_previewed_pane(state: &mut ClientShellState) {
     moved.agents[1].state_change_seq = 3;
     state.set_snapshot(Box::new(moved));
     let mut moved_surface = surface();
-    moved_surface.projection_revision = 3;
-    moved_surface.surface_revision = 3;
+    moved_surface.projection_revision = 4;
+    moved_surface.surface_revision = 4;
     moved_surface.panes[0].pane_id = "pane_2".into();
     state.set_pane_surface(moved_surface);
 }
