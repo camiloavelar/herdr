@@ -890,13 +890,11 @@ pub(crate) struct ClientShellState {
     pub(super) collapsed_endpoints: HashSet<ClientEndpointId>,
     pub(super) mode: ClientShellMode,
     pub(super) navigate_workspace_id: Option<WorkspaceNavigationTarget>,
-    pub(super) navigate_agent: Option<AgentNavigationTarget>,
-    pub(super) navigation_preview_origin: Option<NavigationPreviewOrigin>,
+    pub(super) fork: ForkShellState,
     pub(super) pending_workspace_highlight: Option<PendingWorkspaceHighlight>,
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
-    pub(super) last_targets: LastTargets,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
     pub(super) link_hover: Option<super::link_hover::LinkHover>,
     pub(super) url_click_consumes_until_up: bool,
@@ -1058,13 +1056,11 @@ impl ClientShellState {
             collapsed_endpoints: HashSet::new(),
             mode: ClientShellMode::Terminal,
             navigate_workspace_id: None,
-            navigate_agent: None,
-            navigation_preview_origin: None,
+            fork: ForkShellState::default(),
             pending_workspace_highlight: None,
             reveal_navigation_workspace: false,
             overlay,
             previous_pane_id: None,
-            last_targets: LastTargets::default(),
             pane_mouse_gesture: None,
             link_hover: None,
             url_click_consumes_until_up: false,
@@ -1362,9 +1358,7 @@ impl ClientShellState {
         {
             self.hits = ShellHitMap::default();
         }
-        if !boot_changed {
-            self.track_last_targets(&snapshot);
-        }
+        self.track_last_targets(&snapshot, boot_changed);
         if boot_changed {
             // A reboot must not turn Enter on a stale preview into focus on a reused ID.
             let preview = (self.mode == ClientShellMode::Navigate)

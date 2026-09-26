@@ -1,15 +1,16 @@
-use super::*;
+use super::agent_navigation::AgentNavigationTarget;
+use crate::client::shell::*;
 
 /// What to refocus when navigation preview is cancelled instead of accepted.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum NavigationPreviewRestore {
+pub(in crate::client::shell) enum NavigationPreviewRestore {
     Workspace(String),
     Pane(String),
 }
 
 /// Focus captured when a navigation mode started with `ui.navigation_preview` on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct NavigationPreviewOrigin {
+pub(in crate::client::shell) struct NavigationPreviewOrigin {
     endpoint_id: ClientEndpointId,
     restore: NavigationPreviewRestore,
     /// Set once a preview focus was sent, so cancel knows a restore is needed.
@@ -18,21 +19,21 @@ pub(super) struct NavigationPreviewOrigin {
 
 impl ClientShellState {
     fn begin_navigation_preview(&mut self, restore: Option<NavigationPreviewRestore>) {
-        self.navigation_preview_origin = None;
+        self.fork.navigation_preview_origin = None;
         if !self.config.navigation_preview {
             return;
         }
         let Some(restore) = restore else {
             return;
         };
-        self.navigation_preview_origin = Some(NavigationPreviewOrigin {
+        self.fork.navigation_preview_origin = Some(NavigationPreviewOrigin {
             endpoint_id: self.active_endpoint_id.clone(),
             restore,
             previewed: false,
         });
     }
 
-    pub(super) fn begin_workspace_navigation_preview(&mut self) {
+    pub(in crate::client::shell) fn begin_workspace_navigation_preview(&mut self) {
         let restore = self
             .snapshot
             .as_deref()
@@ -41,7 +42,7 @@ impl ClientShellState {
         self.begin_navigation_preview(restore);
     }
 
-    pub(super) fn begin_agent_navigation_preview(&mut self) {
+    pub(in crate::client::shell) fn begin_agent_navigation_preview(&mut self) {
         let restore = self
             .snapshot
             .as_deref()
@@ -50,7 +51,10 @@ impl ClientShellState {
         self.begin_navigation_preview(restore);
     }
 
-    pub(super) fn preview_navigate_workspace(&mut self, outcome: &mut ClientShellInput) {
+    pub(in crate::client::shell) fn preview_navigate_workspace(
+        &mut self,
+        outcome: &mut ClientShellInput,
+    ) {
         let Some(target) = self.navigate_workspace_id.clone() else {
             return;
         };
@@ -61,8 +65,11 @@ impl ClientShellState {
         );
     }
 
-    pub(super) fn preview_navigate_agent(&mut self, outcome: &mut ClientShellInput) {
-        let Some(target) = self.navigate_agent.clone() else {
+    pub(in crate::client::shell) fn preview_navigate_agent(
+        &mut self,
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(target) = self.fork.navigate_agent.clone() else {
             return;
         };
         self.preview_navigation_focus(
@@ -79,7 +86,7 @@ impl ClientShellState {
         target: ClientEndpointFocusTarget,
         outcome: &mut ClientShellInput,
     ) {
-        let Some(origin) = self.navigation_preview_origin.as_mut() else {
+        let Some(origin) = self.fork.navigation_preview_origin.as_mut() else {
             return;
         };
         if endpoint_id != origin.endpoint_id {
@@ -90,8 +97,11 @@ impl ClientShellState {
     }
 
     /// Restores the origin focus if a preview was shown. Called on every non-Enter exit.
-    pub(super) fn cancel_navigation_preview(&mut self, outcome: &mut ClientShellInput) {
-        let Some(origin) = self.navigation_preview_origin.take() else {
+    pub(in crate::client::shell) fn cancel_navigation_preview(
+        &mut self,
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(origin) = self.fork.navigation_preview_origin.take() else {
             return;
         };
         if !origin.previewed || origin.endpoint_id != self.active_endpoint_id {
@@ -123,14 +133,14 @@ impl ClientShellState {
 
     /// Keeps the row that was focused when navigation started painted as focused
     /// while a preview has moved the real focus elsewhere.
-    pub(super) fn render_navigation_preview_origin(&self, buffer: &mut Buffer) {
+    pub(in crate::client::shell) fn render_navigation_preview_origin(&self, buffer: &mut Buffer) {
         if !matches!(
             self.mode,
             ClientShellMode::Navigate | ClientShellMode::NavigateAgents
         ) {
             return;
         }
-        let Some(origin) = self.navigation_preview_origin.as_ref() else {
+        let Some(origin) = self.fork.navigation_preview_origin.as_ref() else {
             return;
         };
         if !origin.previewed {
@@ -158,7 +168,7 @@ impl ClientShellState {
                     endpoint_id: origin.endpoint_id.clone(),
                     pane_id: pane_id.clone(),
                 };
-                if self.navigate_agent.as_ref() == Some(&target) {
+                if self.fork.navigate_agent.as_ref() == Some(&target) {
                     return;
                 }
                 self.agent_row_rect(&target)
@@ -171,15 +181,16 @@ impl ClientShellState {
 
     /// True while a preview focus is showing a pane the user has not accepted yet.
     /// Presenting a previewed pane must not mark its agent as seen.
-    pub(super) fn navigation_preview_active(&self) -> bool {
-        self.navigation_preview_origin
+    pub(in crate::client::shell) fn navigation_preview_active(&self) -> bool {
+        self.fork
+            .navigation_preview_origin
             .as_ref()
             .is_some_and(|origin| origin.previewed)
     }
 
     /// Enter keeps the previewed focus; forget the origin and acknowledge what is on screen.
-    pub(super) fn commit_navigation_preview(&mut self) {
-        if self.navigation_preview_origin.take().is_none() {
+    pub(in crate::client::shell) fn commit_navigation_preview(&mut self) {
+        if self.fork.navigation_preview_origin.take().is_none() {
             return;
         }
         if let Some(surface) = self.pane_surface.clone() {

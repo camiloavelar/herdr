@@ -99,7 +99,7 @@ fn workspace_navigation_enter_keeps_previewed_focus() {
     let enter = state.handle_input_bytes(b"\r");
     assert_eq!(workspace_focus_ids(&enter), vec!["ws_2"]);
     assert_eq!(state.mode, ClientShellMode::Terminal);
-    assert!(state.navigation_preview_origin.is_none());
+    assert!(state.fork.navigation_preview_origin.is_none());
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn agent_navigation_enter_keeps_previewed_focus() {
     let enter = state.handle_input_bytes(b"\r");
     assert_eq!(pane_focus_ids(&enter), vec!["pane_2"]);
     assert_eq!(state.mode, ClientShellMode::Terminal);
-    assert!(state.navigation_preview_origin.is_none());
+    assert!(state.fork.navigation_preview_origin.is_none());
 }
 
 #[test]

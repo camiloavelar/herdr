@@ -62,57 +62,30 @@ pub(super) fn render_expanded(
         return;
     }
     let rows = agent_rows(endpoints, active_endpoint_id, config);
-    let federated = endpoints.len() > 1;
-    let items = super::agent_groups::group_items(
-        rows,
-        config,
-        |row| {
-            super::agent_groups::endpoint_group(
-                endpoints,
-                &row.endpoint_id,
-                &row.agent.pane_id,
-                federated,
-            )
-        },
-        |row| super::agent_groups::endpoint_rank(endpoints, &row.endpoint_id, &row.agent.pane_id),
-    );
-    super::agent_sidebar::render_agent_list(
+    super::agent_groups::render_grouped_agent_list(
         buffer,
         area,
-        &items,
+        &rows,
         agent_view_label.map(|_| " no matching agents"),
         config,
         agent_scroll,
         hits,
-        |item| item.lines(|row| row.agent.rows.len()),
-        |buffer, rect, item, hits| match item {
-            super::agent_groups::AgentPanelItem::Header {
-                label,
-                leading_blank,
-            } => super::agent_groups::render_group_header(
-                buffer,
-                rect,
-                label,
-                *leading_blank,
-                config,
-            ),
-            super::agent_groups::AgentPanelItem::Agent(row) => {
-                super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
-                if row.stale {
-                    buffer.set_style(
-                        rect,
-                        Style::default()
-                            .fg(config.palette.overlay0)
-                            .add_modifier(Modifier::DIM),
-                    );
-                }
-                hits.endpoint_agents.push((
+        |row| row.agent.rows.len(),
+        |buffer, rect, row, hits| {
+            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
+            if row.stale {
+                buffer.set_style(
                     rect,
-                    row.endpoint_id.clone(),
-                    row.agent.pane_id.clone(),
-                ));
+                    Style::default()
+                        .fg(config.palette.overlay0)
+                        .add_modifier(Modifier::DIM),
+                );
             }
+            hits.endpoint_agents
+                .push((rect, row.endpoint_id.clone(), row.agent.pane_id.clone()));
         },
+        |row| super::agent_groups::endpoint_group(endpoints, &row.endpoint_id, &row.agent.pane_id),
+        |row| super::agent_groups::endpoint_rank(endpoints, &row.endpoint_id, &row.agent.pane_id),
     );
 }
 

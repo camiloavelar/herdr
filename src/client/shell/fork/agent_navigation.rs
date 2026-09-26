@@ -1,14 +1,14 @@
-use super::*;
+use crate::client::shell::*;
 
 /// Client-only agents-panel selection for `NavigateAgents` mode.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct AgentNavigationTarget {
-    pub(super) endpoint_id: ClientEndpointId,
-    pub(super) pane_id: String,
+pub(in crate::client::shell) struct AgentNavigationTarget {
+    pub(in crate::client::shell) endpoint_id: ClientEndpointId,
+    pub(in crate::client::shell) pane_id: String,
 }
 
 /// Status bar segments shown while `NavigateAgents` mode is active.
-pub(super) fn status_bar_segments(
+pub(in crate::client::shell) fn status_bar_segments(
     mode_style: Style,
     base: Style,
     key: Style,
@@ -25,7 +25,7 @@ pub(super) fn status_bar_segments(
 
 impl ClientShellState {
     fn agent_navigation_targets(&self) -> Vec<AgentNavigationTarget> {
-        super::agent_groups::displayed_agent_targets(
+        crate::client::shell::agent_groups::displayed_agent_targets(
             &self.endpoints,
             &self.active_endpoint_id,
             &self.config,
@@ -38,13 +38,16 @@ impl ClientShellState {
         .collect()
     }
 
-    pub(super) fn enter_agent_navigation(&mut self, outcome: &mut ClientShellInput) {
+    pub(in crate::client::shell) fn enter_agent_navigation(
+        &mut self,
+        outcome: &mut ClientShellInput,
+    ) {
         let targets = self.agent_navigation_targets();
         let focused = self
             .snapshot
             .as_deref()
             .and_then(|snapshot| snapshot.focused_pane_id.as_deref());
-        self.navigate_agent = targets
+        self.fork.navigate_agent = targets
             .iter()
             .find(|target| {
                 target.endpoint_id == self.active_endpoint_id
@@ -60,16 +63,17 @@ impl ClientShellState {
     fn leave_agent_navigation(&mut self, outcome: &mut ClientShellInput) {
         self.cancel_navigation_preview(outcome);
         self.mode = self.copy_or_terminal_mode();
-        self.navigate_agent = None;
+        self.fork.navigate_agent = None;
     }
 
     fn move_navigate_agent(&mut self, delta: isize) {
         let targets = self.agent_navigation_targets();
         if targets.is_empty() {
-            self.navigate_agent = None;
+            self.fork.navigate_agent = None;
             return;
         }
         let current = self
+            .fork
             .navigate_agent
             .as_ref()
             .and_then(|selected| targets.iter().position(|target| target == selected));
@@ -82,11 +86,11 @@ impl ClientShellState {
         if self.agent_row_rect(target).is_none() {
             self.agent_scroll = next.min(self.hits.agent_max_scroll);
         }
-        self.navigate_agent = Some(target.clone());
+        self.fork.navigate_agent = Some(target.clone());
     }
 
     fn accept_navigate_agent(&mut self, outcome: &mut ClientShellInput) {
-        let Some(target) = self.navigate_agent.clone() else {
+        let Some(target) = self.fork.navigate_agent.clone() else {
             self.leave_agent_navigation(outcome);
             outcome.repaint = true;
             return;
@@ -103,12 +107,12 @@ impl ClientShellState {
         ) {
             self.commit_navigation_preview();
             self.mode = ClientShellMode::Terminal;
-            self.navigate_agent = None;
+            self.fork.navigate_agent = None;
         }
         outcome.repaint = true;
     }
 
-    pub(super) fn route_navigate_agents_key(
+    pub(in crate::client::shell) fn route_navigate_agents_key(
         &mut self,
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
@@ -148,7 +152,10 @@ impl ClientShellState {
     }
 
     /// Rect of the agents-panel row for `target` in the last composed frame, if visible.
-    pub(super) fn agent_row_rect(&self, target: &AgentNavigationTarget) -> Option<Rect> {
+    pub(in crate::client::shell) fn agent_row_rect(
+        &self,
+        target: &AgentNavigationTarget,
+    ) -> Option<Rect> {
         self.hits
             .agents
             .iter()
@@ -168,12 +175,13 @@ impl ClientShellState {
 
     /// Paints navigation overlays after the sidebar has been rendered: the
     /// preview origin row, then the selected agents-panel row.
-    pub(super) fn render_navigation_overlays(&self, buffer: &mut Buffer) {
+    pub(in crate::client::shell) fn render_navigation_overlays(&self, buffer: &mut Buffer) {
         self.render_navigation_preview_origin(buffer);
         if self.mode != ClientShellMode::NavigateAgents {
             return;
         }
         let Some(rect) = self
+            .fork
             .navigate_agent
             .as_ref()
             .and_then(|target| self.agent_row_rect(target))

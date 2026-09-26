@@ -183,12 +183,8 @@ impl ClientShellState {
                     self.push_endpoint_method(method, outcome);
                     return;
                 }
-                if matches!(
-                    action,
-                    crate::input::KeybindAction::LastWorkspace
-                        | crate::input::KeybindAction::LastTab
-                ) {
-                    return; // client-side history only; nothing to do without a target
+                if super::last_targets::is_client_only(action) {
+                    return;
                 }
                 outcome.actions.push(ClientShellAction::Keybind(action));
             }

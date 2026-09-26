@@ -1,13 +1,13 @@
-use super::*;
+use crate::client::shell::*;
 
 /// One entry of the agents panel list when grouping by space is enabled.
-pub(super) enum AgentPanelItem<R> {
+pub(in crate::client::shell) enum AgentPanelItem<R> {
     Header { label: String, leading_blank: bool },
     Agent(R),
 }
 
 impl<R> AgentPanelItem<R> {
-    pub(super) fn lines(&self, agent_lines: impl Fn(&R) -> usize) -> usize {
+    pub(in crate::client::shell) fn lines(&self, agent_lines: impl Fn(&R) -> usize) -> usize {
         match self {
             Self::Header { leading_blank, .. } => 1 + usize::from(*leading_blank),
             Self::Agent(row) => agent_lines(row),
@@ -16,7 +16,7 @@ impl<R> AgentPanelItem<R> {
 }
 
 /// Grouping applies only to the "spaces" ordering; "priority" stays a flat queue.
-pub(super) fn grouping_enabled(config: &ClientShellConfig) -> bool {
+pub(in crate::client::shell) fn grouping_enabled(config: &ClientShellConfig) -> bool {
     config.agents.group_by_space
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
 }
@@ -24,7 +24,7 @@ pub(super) fn grouping_enabled(config: &ClientShellConfig) -> bool {
 /// Folds agent rows into header + rows groups, in order of first appearance.
 /// `group_of` yields a stable key and the header label; rows without one are
 /// kept in place without a header.
-pub(super) fn group_items<R>(
+pub(in crate::client::shell) fn group_items<R>(
     rows: Vec<R>,
     config: &ClientShellConfig,
     group_of: impl Fn(&R) -> Option<(String, String)>,
@@ -66,17 +66,61 @@ pub(super) fn group_items<R>(
     items
 }
 
-/// Priority-mode ranking: status urgency first, then most recent state change.
-pub(super) type AgentRank = (u8, u64);
+/// `render_agent_list` with space headers when grouping is enabled. Rows are
+/// grouped by reference, so rendering does not clone them.
+#[allow(clippy::too_many_arguments)] // Mirrors render_agent_list plus the two grouping keys.
+pub(in crate::client::shell) fn render_grouped_agent_list<T>(
+    buffer: &mut Buffer,
+    area: Rect,
+    rows: &[T],
+    empty_message: Option<&str>,
+    config: &ClientShellConfig,
+    agent_scroll: &mut usize,
+    hits: &mut ShellHitMap,
+    row_lines: impl Fn(&T) -> usize,
+    mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
+    group_of: impl Fn(&T) -> Option<(String, String)>,
+    rank_of: impl Fn(&T) -> AgentRank,
+) {
+    let items = group_items(
+        rows.iter().collect(),
+        config,
+        |row| group_of(row),
+        |row| rank_of(row),
+    );
+    crate::client::shell::agent_sidebar::render_agent_list(
+        buffer,
+        area,
+        &items,
+        empty_message,
+        config,
+        agent_scroll,
+        hits,
+        |item| item.lines(|row| row_lines(row)),
+        |buffer, rect, item, hits| match item {
+            AgentPanelItem::Header {
+                label,
+                leading_blank,
+            } => render_group_header(buffer, rect, label, *leading_blank, config),
+            AgentPanelItem::Agent(row) => render_row(buffer, rect, row, hits),
+        },
+    );
+}
 
-pub(super) fn agent_rank(snapshot: &ClientShellSnapshot, pane_id: &str) -> AgentRank {
+/// Priority-mode ranking: status urgency first, then most recent state change.
+pub(in crate::client::shell) type AgentRank = (u8, u64);
+
+pub(in crate::client::shell) fn agent_rank(
+    snapshot: &ClientShellSnapshot,
+    pane_id: &str,
+) -> AgentRank {
     snapshot
         .agents
         .iter()
         .find(|agent| agent.pane_id == pane_id)
         .map(|agent| {
             (
-                super::status_priority(agent.agent_status),
+                crate::client::shell::status_priority(agent.agent_status),
                 agent.state_change_seq,
             )
         })
@@ -84,7 +128,7 @@ pub(super) fn agent_rank(snapshot: &ClientShellSnapshot, pane_id: &str) -> Agent
 }
 
 /// Space (key, label) of the agent living in `pane_id`.
-pub(super) fn workspace_group(
+pub(in crate::client::shell) fn workspace_group(
     snapshot: &ClientShellSnapshot,
     pane_id: &str,
 ) -> Option<(String, String)> {
@@ -99,7 +143,7 @@ pub(super) fn workspace_group(
     Some((workspace.workspace_id.clone(), workspace.label.clone()))
 }
 
-pub(super) fn render_group_header(
+pub(in crate::client::shell) fn render_group_header(
     buffer: &mut Buffer,
     rect: Rect,
     label: &str,
@@ -123,7 +167,7 @@ pub(super) fn render_group_header(
 
 /// With machine/workspace hidden under a group header, a row left holding only
 /// the state icon merges into the following row so the icon still leads a line.
-pub(super) fn merge_lone_icon_rows(
+pub(in crate::client::shell) fn merge_lone_icon_rows(
     rows: Vec<Vec<crate::ui::ResolvedToken>>,
 ) -> Vec<Vec<crate::ui::ResolvedToken>> {
     let mut merged = Vec::with_capacity(rows.len());
@@ -147,20 +191,49 @@ pub(super) fn merge_lone_icon_rows(
     merged
 }
 
+/// Grouped rows show the machine and space once, on the group header.
+pub(in crate::client::shell) fn row_machine<'a>(
+    machine: Option<&'a str>,
+    config: &ClientShellConfig,
+) -> Option<&'a str> {
+    machine.filter(|_| !grouping_enabled(config))
+}
+
+pub(in crate::client::shell) fn row_workspace<'a>(
+    label: &'a str,
+    config: &ClientShellConfig,
+) -> &'a str {
+    if grouping_enabled(config) {
+        ""
+    } else {
+        label
+    }
+}
+
+pub(in crate::client::shell) fn finish_rows(
+    rows: Vec<Vec<crate::ui::ResolvedToken>>,
+    config: &ClientShellConfig,
+) -> Vec<Vec<crate::ui::ResolvedToken>> {
+    if grouping_enabled(config) {
+        merge_lone_icon_rows(rows)
+    } else {
+        rows
+    }
+}
+
 /// Group key/label for an agent of one machine: the space, prefixed with the
 /// machine label when several machines are shown.
-pub(super) fn endpoint_group(
+pub(in crate::client::shell) fn endpoint_group(
     endpoints: &[ClientShellEndpoint],
     endpoint_id: &ClientEndpointId,
     pane_id: &str,
-    federated: bool,
 ) -> Option<(String, String)> {
     let endpoint = endpoints
         .iter()
         .find(|endpoint| &endpoint.endpoint_id == endpoint_id)?;
     let (workspace_id, label) = workspace_group(endpoint.snapshot.as_deref()?, pane_id)?;
     let key = format!("{endpoint_id:?}/{workspace_id}");
-    let label = if federated {
+    let label = if endpoints.len() > 1 {
         format!("{} · {label}", endpoint.label)
     } else {
         label
@@ -168,7 +241,7 @@ pub(super) fn endpoint_group(
     Some((key, label))
 }
 
-pub(super) fn endpoint_rank(
+pub(in crate::client::shell) fn endpoint_rank(
     endpoints: &[ClientShellEndpoint],
     endpoint_id: &ClientEndpointId,
     pane_id: &str,
@@ -192,11 +265,14 @@ fn agents_only<R>(items: Vec<AgentPanelItem<R>>) -> Vec<R> {
 }
 
 /// Pane ids in the order the local agents panel displays them.
-pub(super) fn displayed_agent_pane_ids(
+pub(in crate::client::shell) fn displayed_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
 ) -> Vec<String> {
-    let ids = super::agent_sidebar::ordered_agent_pane_ids(snapshot, config.agent_panel_sort);
+    let ids = crate::client::shell::agent_sidebar::ordered_agent_pane_ids(
+        snapshot,
+        config.agent_panel_sort,
+    );
     agents_only(group_items(
         ids,
         config,
@@ -206,21 +282,20 @@ pub(super) fn displayed_agent_pane_ids(
 }
 
 /// Online agent targets in the order the agents panel displays them.
-pub(super) fn displayed_agent_targets(
+pub(in crate::client::shell) fn displayed_agent_targets(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
-) -> Vec<super::aggregate_navigation::AggregateAgentTarget> {
-    let targets = super::aggregate_navigation::online_agent_targets(
+) -> Vec<crate::client::shell::aggregate_navigation::AggregateAgentTarget> {
+    let targets = crate::client::shell::aggregate_navigation::online_agent_targets(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
     );
-    let federated = endpoints.len() > 1;
     agents_only(group_items(
         targets,
         config,
-        |target| endpoint_group(endpoints, &target.endpoint_id, &target.pane_id, federated),
+        |target| endpoint_group(endpoints, &target.endpoint_id, &target.pane_id),
         |target| endpoint_rank(endpoints, &target.endpoint_id, &target.pane_id),
     ))
 }

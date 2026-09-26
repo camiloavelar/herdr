@@ -238,6 +238,7 @@ fn agent_navigation_follows_the_grouped_display_order() {
     state.handle_input_bytes(b"a");
     let selected = |state: &ClientShellState| {
         state
+            .fork
             .navigate_agent
             .as_ref()
             .map(|target| target.pane_id.clone())

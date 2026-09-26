@@ -42,6 +42,7 @@ fn agent_state() -> ClientShellState {
 
 fn selected_pane(state: &ClientShellState) -> Option<&str> {
     state
+        .fork
         .navigate_agent
         .as_ref()
         .map(|target| target.pane_id.as_str())
@@ -108,7 +109,7 @@ fn prefix_a_enters_agent_navigation_and_enter_focuses_selected_agent() {
         crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_2"
     ));
     assert_eq!(state.mode, ClientShellMode::Terminal);
-    assert!(state.navigate_agent.is_none());
+    assert!(state.fork.navigate_agent.is_none());
 }
 
 #[test]
@@ -118,7 +119,7 @@ fn escape_leaves_agent_navigation_without_focusing() {
     let esc = state.handle_input_bytes(b"\x1b");
     assert!(esc.actions.is_empty());
     assert_eq!(state.mode, ClientShellMode::Terminal);
-    assert!(state.navigate_agent.is_none());
+    assert!(state.fork.navigate_agent.is_none());
 }
 
 #[test]
@@ -139,7 +140,7 @@ fn other_prefix_bindings_leave_agent_navigation_and_run() {
     let switch = state.handle_input_bytes(b"w");
     assert!(switch.actions.is_empty());
     assert_eq!(state.mode, ClientShellMode::Navigate);
-    assert!(state.navigate_agent.is_none());
+    assert!(state.fork.navigate_agent.is_none());
     assert_eq!(
         state.navigate_workspace_id,
         state.navigation_target(&ClientEndpointId::Local, "ws_1")

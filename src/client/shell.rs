@@ -1,18 +1,14 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+// camiloavelar/herdr fork features live in shell/fork/; keep hooks elsewhere to one line.
+mod fork;
+use fork::*;
 mod actions;
-mod agent_groups;
 mod agent_sidebar;
 mod aggregate_navigation;
 mod machine_diagnostics;
 mod workspace_navigation;
 use workspace_navigation::{PendingWorkspaceHighlight, WorkspaceNavigationTarget};
-mod agent_navigation;
-use agent_navigation::AgentNavigationTarget;
-mod navigation_preview;
-use navigation_preview::NavigationPreviewOrigin;
-mod last_targets;
-use last_targets::LastTargets;
 mod composition;
 mod config;
 mod context_menu;

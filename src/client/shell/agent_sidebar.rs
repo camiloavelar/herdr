@@ -68,16 +68,10 @@ pub(super) fn render_agent_panel(
     }
 
     let rows = agent_rows(snapshot, config, None);
-    let items = super::agent_groups::group_items(
-        rows,
-        config,
-        |row| super::agent_groups::workspace_group(snapshot, &row.pane_id),
-        |row| super::agent_groups::agent_rank(snapshot, &row.pane_id),
-    );
-    render_agent_list(
+    super::agent_groups::render_grouped_agent_list(
         buffer,
         area,
-        &items,
+        &rows,
         snapshot
             .agent_view_label
             .as_ref()
@@ -85,23 +79,13 @@ pub(super) fn render_agent_panel(
         config,
         agent_scroll,
         hits,
-        |item| item.lines(|row| row.rows.len()),
-        |buffer, rect, item, hits| match item {
-            super::agent_groups::AgentPanelItem::Header {
-                label,
-                leading_blank,
-            } => super::agent_groups::render_group_header(
-                buffer,
-                rect,
-                label,
-                *leading_blank,
-                config,
-            ),
-            super::agent_groups::AgentPanelItem::Agent(row) => {
-                hits.agents.push((rect, row.pane_id.clone()));
-                render_agent_row(buffer, rect, row, config);
-            }
+        |row| row.rows.len(),
+        |buffer, rect, row, hits| {
+            hits.agents.push((rect, row.pane_id.clone()));
+            render_agent_row(buffer, rect, row, config);
         },
+        |row| super::agent_groups::workspace_group(snapshot, &row.pane_id),
+        |row| super::agent_groups::agent_rank(snapshot, &row.pane_id),
     );
 }
 
@@ -310,15 +294,12 @@ pub(super) fn agent_row(
         .agent
         .as_deref()
         .and_then(crate::detect::parse_agent_label);
+    let machine = super::agent_groups::row_machine(machine, config);
     let rows = crate::ui::sidebar_agent_rows(
         &config.agents,
         crate::ui::AgentTokenContext {
-            machine: machine.filter(|_| !super::agent_groups::grouping_enabled(config)),
-            workspace: if super::agent_groups::grouping_enabled(config) {
-                ""
-            } else {
-                &workspace.label
-            },
+            machine,
+            workspace: super::agent_groups::row_workspace(&workspace.label, config),
             tab: tab_label,
             pane: agent
                 .title
@@ -332,11 +313,7 @@ pub(super) fn agent_row(
         },
         state_text,
     );
-    let rows = if super::agent_groups::grouping_enabled(config) {
-        super::agent_groups::merge_lone_icon_rows(rows)
-    } else {
-        rows
-    };
+    let rows = super::agent_groups::finish_rows(rows, config);
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
         status: agent.agent_status,

@@ -542,6 +542,7 @@ impl ClientShellState {
         mut snapshot: Box<ClientShellSnapshot>,
         acknowledge_surface: bool,
     ) {
+        let acknowledge_surface = acknowledge_surface && !self.navigation_preview_active();
         snapshot
             .commands
             .retain(|command| command.action != crate::protocol::ClientShellCommandAction::Unknown);
@@ -572,10 +573,7 @@ impl ClientShellState {
         self.endpoints[index]
             .agent_presentation
             .project_snapshot_for_generation(&mut snapshot, generation);
-        let presented_surface = if acknowledge_surface
-            && !self.navigation_preview_active()
-            && endpoint_id == &self.active_endpoint_id
-        {
+        let presented_surface = if acknowledge_surface && endpoint_id == &self.active_endpoint_id {
             self.pane_surface.as_ref()
         } else {
             None

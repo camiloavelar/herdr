@@ -1,9 +1,9 @@
-use super::*;
 use crate::api::schema::{Method, TabTarget, WorkspaceTarget};
+use crate::client::shell::*;
 
 /// Client-side focus history behind the `last_workspace` and `last_tab` actions.
 #[derive(Debug, Default)]
-pub(super) struct LastTargets {
+pub(in crate::client::shell) struct LastTargets {
     /// Space focused before the current one (tmux `switch-client -l`).
     workspace_id: Option<String>,
     /// Per space: the tab focused before its current one (tmux `last-window`).
@@ -12,7 +12,15 @@ pub(super) struct LastTargets {
 
 impl ClientShellState {
     /// Records focus changes between the current snapshot and the incoming one.
-    pub(super) fn track_last_targets(&mut self, next: &ClientShellSnapshot) {
+    /// A server reboot reuses IDs, so its first snapshot is not a focus move.
+    pub(in crate::client::shell) fn track_last_targets(
+        &mut self,
+        next: &ClientShellSnapshot,
+        boot_changed: bool,
+    ) {
+        if boot_changed {
+            return;
+        }
         let Some(current) = self.snapshot.as_deref() else {
             return;
         };
@@ -21,7 +29,7 @@ impl ClientShellState {
             next.focused_workspace_id.as_ref(),
         ) {
             if previous != focused {
-                self.last_targets.workspace_id = Some(previous.clone());
+                self.fork.last_targets.workspace_id = Some(previous.clone());
             }
         }
         if let (Some(previous), Some(focused)) = (
@@ -42,7 +50,8 @@ impl ClientShellState {
                     (workspace_of(current, previous), workspace_of(next, focused))
                 {
                     if from == to {
-                        self.last_targets
+                        self.fork
+                            .last_targets
                             .tab_by_workspace
                             .insert(from, previous.clone());
                     }
@@ -51,12 +60,15 @@ impl ClientShellState {
         }
     }
 
-    pub(super) fn reset_last_targets(&mut self) {
-        self.last_targets = LastTargets::default();
+    pub(in crate::client::shell) fn reset_last_targets(&mut self) {
+        self.fork.last_targets = LastTargets::default();
     }
 
-    pub(super) fn last_workspace_method(&self, snapshot: &ClientShellSnapshot) -> Option<Method> {
-        let workspace_id = self.last_targets.workspace_id.as_ref()?;
+    pub(in crate::client::shell) fn last_workspace_method(
+        &self,
+        snapshot: &ClientShellSnapshot,
+    ) -> Option<Method> {
+        let workspace_id = self.fork.last_targets.workspace_id.as_ref()?;
         if snapshot.focused_workspace_id.as_ref() == Some(workspace_id)
             || !snapshot
                 .workspaces
@@ -70,9 +82,12 @@ impl ClientShellState {
         }))
     }
 
-    pub(super) fn last_tab_method(&self, snapshot: &ClientShellSnapshot) -> Option<Method> {
+    pub(in crate::client::shell) fn last_tab_method(
+        &self,
+        snapshot: &ClientShellSnapshot,
+    ) -> Option<Method> {
         let workspace_id = snapshot.focused_workspace_id.as_ref()?;
-        let tab_id = self.last_targets.tab_by_workspace.get(workspace_id)?;
+        let tab_id = self.fork.last_targets.tab_by_workspace.get(workspace_id)?;
         if snapshot.focused_tab_id.as_ref() == Some(tab_id)
             || !snapshot
                 .tabs
@@ -84,5 +99,25 @@ impl ClientShellState {
         Some(Method::TabFocus(TabTarget {
             tab_id: tab_id.clone(),
         }))
+    }
+}
+
+/// History actions resolve on the client; without a target there is nothing to forward.
+pub(in crate::client::shell) fn is_client_only(action: crate::input::KeybindAction) -> bool {
+    matches!(
+        action,
+        crate::input::KeybindAction::LastWorkspace | crate::input::KeybindAction::LastTab
+    )
+}
+
+impl ClientShellState {
+    /// Prefix twice sends the prefix to the pane, unless the user bound the doubled
+    /// prefix (for example `last_workspace = "prefix+b"` with prefix `ctrl+b`).
+    pub(in crate::client::shell) fn doubled_prefix_passes_through(
+        &self,
+        key: &crate::input::TerminalKey,
+    ) -> bool {
+        crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
+            && crate::input::resolve_prefix_binding(&self.config.keybinds.keybinds, key).is_none()
     }
 }
