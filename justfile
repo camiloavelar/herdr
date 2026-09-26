@@ -1,5 +1,6 @@
 # herdr task runner
 set windows-shell := ["cmd.exe", "/d", "/s", "/c"]
+import 'scripts/fork/fork.just' # camiloavelar/herdr fork recipes
 
 python := if os() == "windows" { "python" } else { "python3" }
 
