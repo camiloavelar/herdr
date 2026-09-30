@@ -117,9 +117,7 @@ impl ClientShellState {
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) {
-        if key.code == KeyCode::Esc
-            || crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
-        {
+        if key.code == KeyCode::Esc || self.config.keybinds.matches_prefix(key) {
             self.leave_agent_navigation(outcome);
             outcome.repaint = true;
             return;
