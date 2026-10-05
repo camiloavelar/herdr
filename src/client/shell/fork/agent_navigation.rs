@@ -146,6 +146,12 @@ impl ClientShellState {
             self.leave_agent_navigation(outcome);
             outcome.repaint = true;
             self.record_binding(binding, outcome);
+        } else if key.code == KeyCode::Char('[')
+            && key.modifiers == crossterm::event::KeyModifiers::CONTROL
+        {
+            // Ctrl+[ cancels like Esc, matching upstream navigate mode.
+            self.leave_agent_navigation(outcome);
+            outcome.repaint = true;
         }
     }
 
