@@ -117,7 +117,7 @@ impl ClientShellState {
         &self,
         key: &crate::input::TerminalKey,
     ) -> bool {
-        crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
+        self.config.keybinds.matches_prefix(key)
             && crate::input::resolve_prefix_binding(&self.config.keybinds.keybinds, key).is_none()
     }
 }

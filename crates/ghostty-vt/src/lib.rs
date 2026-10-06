@@ -12,7 +12,7 @@ pub mod bindings;
 
 use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -1280,6 +1280,29 @@ impl Terminal {
         self.screen_text_rows_range(0, usize::MAX)
     }
 
+    /// Visit a screen row without allocating an owned grapheme vector for each cell.
+    /// The borrowed graphemes are valid only for the duration of each callback.
+    /// Like `screen_text_rows_range`, rows outside the active screen/history are empty.
+    pub fn for_each_screen_row_cell(
+        &self,
+        row: u32,
+        mut visit: impl FnMut(CellWide, &[u32]),
+    ) -> Result<(), Error> {
+        if row as usize >= self.total_rows()? {
+            return Ok(());
+        }
+        let cols = self.cols()?;
+        let mut grid_ref = self.grid_ref(ghostty_screen_point(0, row))?;
+        let mut graphemes = Vec::new();
+        for x in 0..cols {
+            grid_ref.x = x;
+            let wide = grid_ref_wide(&grid_ref)?;
+            grid_ref_graphemes_into(&grid_ref, &mut graphemes)?;
+            visit(wide, &graphemes);
+        }
+        Ok(())
+    }
+
     pub fn screen_text_rows_range(
         &self,
         start_row: usize,
@@ -1824,6 +1847,37 @@ impl Terminal {
         Ok(generation != 0 && self.kitty_empty_generation.get() != Some(generation))
     }
 
+    /// Current fingerprint of each stored image, placed or not, when it is known
+    /// without hashing pixels. `None` means deleted or replaced since last seen.
+    pub fn kitty_image_fingerprints(&self, image_ids: &[u32]) -> Result<Vec<Option<u64>>, Error> {
+        let graphics = self.kitty_graphics()?;
+        if graphics.is_null() {
+            return Ok(vec![None; image_ids.len()]);
+        }
+        image_ids
+            .iter()
+            .map(|&image_id| {
+                let image = unsafe { ffi::ghostty_kitty_graphics_image(graphics, image_id) };
+                if image.is_null() {
+                    return Ok(None);
+                }
+                if let Some(source) = native_source::image_source(image)? {
+                    return Ok(Some(source.fingerprint()));
+                }
+                let generation = kitty_image_u64(
+                    image,
+                    ffi::GhosttyKittyGraphicsImageData_GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
+                )?;
+                Ok(self.kitty_fingerprints.lock().ok().and_then(|cache| {
+                    cache
+                        .get(&image_id)
+                        .filter(|entry| entry.generation == generation)
+                        .map(|entry| entry.fingerprint)
+                }))
+            })
+            .collect()
+    }
+
     pub fn kitty_image_placements(&self) -> Result<Vec<KittyImagePlacement>, Error> {
         self.kitty_image_placements_with_data_filter(|_| true)
     }
@@ -1872,13 +1926,13 @@ impl Terminal {
         }
         if !storage_has_placements {
             self.kitty_empty_generation.set(Some(generation));
-            self.prune_kitty_fingerprints(&[]);
+            self.prune_kitty_fingerprints(graphics);
             return Ok(Vec::new());
         }
 
         placements.extend(self.kitty_virtual_image_placements(graphics, &mut needs_data)?);
         placements.sort_by_key(|placement| placement.z);
-        self.prune_kitty_fingerprints(&placements);
+        self.prune_kitty_fingerprints(graphics);
         Ok(placements)
     }
 
@@ -1923,16 +1977,13 @@ impl Terminal {
         fingerprint
     }
 
-    fn prune_kitty_fingerprints(&self, placements: &[KittyImagePlacement]) {
+    /// Keeps fingerprints for hidden images so scrolling them back into view
+    /// does not re-hash their pixels; generation checks catch replacements.
+    fn prune_kitty_fingerprints(&self, graphics: ffi::GhosttyKittyGraphics) {
         if let Ok(mut cache) = self.kitty_fingerprints.lock() {
-            if cache.is_empty() {
-                return;
-            }
-            let live: HashSet<u32> = placements
-                .iter()
-                .map(|placement| placement.image_id)
-                .collect();
-            cache.retain(|image_id, _| live.contains(image_id));
+            cache.retain(|image_id, _| {
+                !unsafe { ffi::ghostty_kitty_graphics_image(graphics, *image_id) }.is_null()
+            });
         }
     }
 
@@ -2276,6 +2327,8 @@ fn grid_ref_graphemes(grid_ref: &ffi::GhosttyGridRef) -> Result<Vec<u32>, Error>
     if result != ffi::GhosttyResult_GHOSTTY_OUT_OF_SPACE {
         result.into_result()?;
     }
+    // Owned cells keep only this grapheme; unlike the row scratch buffer, they
+    // do not benefit from spare capacity for subsequent cells.
     let mut buffer = vec![0u32; required];
     if required == 0 {
         return Ok(buffer);
@@ -2286,6 +2339,28 @@ fn grid_ref_graphemes(grid_ref: &ffi::GhosttyGridRef) -> Result<Vec<u32>, Error>
     }
     buffer.truncate(required);
     Ok(buffer)
+}
+
+fn grid_ref_graphemes_into(
+    grid_ref: &ffi::GhosttyGridRef,
+    buffer: &mut Vec<u32>,
+) -> Result<(), Error> {
+    let mut required = 0usize;
+    let result =
+        unsafe { ffi::ghostty_grid_ref_graphemes(grid_ref, ptr::null_mut(), 0, &mut required) };
+    if result != ffi::GhosttyResult_GHOSTTY_OUT_OF_SPACE {
+        result.into_result()?;
+    }
+    buffer.resize(required, 0);
+    if required == 0 {
+        return Ok(());
+    }
+    unsafe {
+        ffi::ghostty_grid_ref_graphemes(grid_ref, buffer.as_mut_ptr(), buffer.len(), &mut required)
+            .into_result()?;
+    }
+    buffer.truncate(required);
+    Ok(())
 }
 
 fn grid_ref_wide(grid_ref: &ffi::GhosttyGridRef) -> Result<CellWide, Error> {
@@ -3353,6 +3428,17 @@ impl<'a> RowCellIter<'a> {
         unsafe { ffi::ghostty_render_state_row_cells_select(self.cells.raw, x).into_result() }
     }
 
+    /// Whether the current cell was never written: no text, default style,
+    /// narrow, and no hyperlink. One read replaces the style and text lookups
+    /// for the blank cells that fill most wide panes.
+    pub fn is_default_blank(&self) -> Result<bool, Error> {
+        // Packed cell bits 0..44 hold content, style id, and width; bit 45 is
+        // the hyperlink flag. Protection (44) and OSC 133 semantic marks
+        // (46..48) do not change how a cell renders.
+        const PRESENTATION_BITS: u64 = ((1 << 44) - 1) | (1 << 45);
+        Ok(self.raw_cell()? & PRESENTATION_BITS == 0)
+    }
+
     fn raw_cell(&self) -> Result<ffi::GhosttyCell, Error> {
         let mut raw = ffi::GhosttyCell::default();
         unsafe {
@@ -3635,6 +3721,9 @@ impl<'a> RowCellIter<'a> {
 }
 
 #[cfg(test)]
+mod test_allocations;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -3848,6 +3937,33 @@ mod tests {
                 .generation,
             second_generation
         );
+    }
+
+    #[test]
+    fn kitty_image_fingerprint_survives_hidden_placements_until_the_image_is_deleted() {
+        let mut terminal = Terminal::new(10, 5, 0).unwrap();
+        let cached =
+            |terminal: &Terminal| terminal.kitty_fingerprints.lock().unwrap().contains_key(&7);
+        terminal.write(b"\x1b_Ga=T,f=32,t=d,i=7,p=3,s=1,v=1,c=10,r=5,q=2;/wAA/w==\x1b\\");
+        assert_eq!(
+            terminal
+                .kitty_image_placements_with_data_filter(|_| false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(cached(&terminal));
+
+        terminal.write(b"\x1b_Ga=d,d=a,q=2\x1b\\");
+        assert!(terminal
+            .kitty_image_placements_with_data_filter(|_| false)
+            .unwrap()
+            .is_empty());
+        assert!(cached(&terminal), "a hidden image must not be re-hashed");
+
+        terminal.write(b"\x1b_Ga=d,d=I,i=7,q=2\x1b\\");
+        let _ = terminal.kitty_image_placements_with_data_filter(|_| false);
+        assert!(!cached(&terminal));
     }
 
     #[test]
@@ -4579,6 +4695,76 @@ mod tests {
         assert_eq!(rows[2].cells[0].graphemes, vec!['界' as u32]);
         assert_eq!(rows[2].cells[1].wide, CellWide::SpacerTail);
         assert_eq!(rows[2].cells[2].graphemes, vec!['e' as u32, 0x301]);
+    }
+
+    #[test]
+    fn owned_cell_graphemes_keep_tight_capacity() {
+        let mut terminal = Terminal::new(8, 1, 100).unwrap();
+        terminal.write("xe\u{301}".as_bytes());
+
+        let rows = terminal.screen_text_rows().unwrap();
+        assert_eq!(rows[0].cells[0].graphemes, vec!['x' as u32]);
+        assert_eq!(rows[0].cells[1].graphemes, vec!['e' as u32, 0x301]);
+        for cell in &rows[0].cells {
+            assert_eq!(cell.graphemes.capacity(), cell.graphemes.len());
+        }
+    }
+
+    #[test]
+    fn borrowed_screen_row_cells_match_owned_cells() {
+        let mut terminal = Terminal::new(12, 4, 100).unwrap();
+        let content = format!(
+            "abcdefghi界Z\r\ne{} X\r\n{}\r\n",
+            "\u{301}".repeat(40),
+            char::from_u32(KITTY_UNICODE_PLACEHOLDER).unwrap()
+        );
+        for screen in ["", "\x1b[?1049h"] {
+            terminal.write(screen.as_bytes());
+            terminal.write(content.as_bytes());
+            let expected = terminal.screen_text_rows().unwrap();
+            assert!(expected
+                .iter()
+                .flat_map(|row| &row.cells)
+                .any(|cell| cell.graphemes.len() > 4));
+            for (y, row) in expected.iter().enumerate() {
+                let mut actual = Vec::new();
+                terminal
+                    .for_each_screen_row_cell(y as u32, |wide, graphemes| {
+                        actual.push((wide, graphemes.to_vec()));
+                    })
+                    .unwrap();
+                let expected: Vec<_> = row
+                    .cells
+                    .iter()
+                    .map(|cell| (cell.wide, cell.graphemes.clone()))
+                    .collect();
+                assert_eq!(actual, expected);
+            }
+            terminal
+                .for_each_screen_row_cell(u32::MAX, |_, _| panic!("out-of-range row"))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn borrowed_screen_row_allocations_do_not_scale_with_cell_count() {
+        for cols in [80, 330] {
+            let mut terminal = Terminal::new(cols, 1, 100).unwrap();
+            terminal.write("x".repeat(usize::from(cols)).as_bytes());
+            let mut cells = 0;
+            let (result, allocations) = crate::test_allocations::count(|| {
+                terminal.for_each_screen_row_cell(0, |_, graphemes| {
+                    std::hint::black_box(graphemes);
+                    cells += 1;
+                })
+            });
+            result.unwrap();
+            assert_eq!(cells, cols);
+            assert!(
+                allocations <= 1,
+                "one reusable grapheme buffer per ASCII row, got {allocations} allocations for {cols} cells"
+            );
+        }
     }
 
     #[test]

@@ -123,6 +123,17 @@ fn escape_leaves_agent_navigation_without_focusing() {
 }
 
 #[test]
+fn kitty_ctrl_bracket_leaves_agent_navigation_like_esc() {
+    let mut state = agent_state();
+    enter_agent_navigation(&mut state);
+    // Kitty keyboard protocol (CSI u) encoding of ctrl+[.
+    let outcome = state.handle_input_bytes(b"\x1b[91;5u");
+    assert!(outcome.actions.is_empty());
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+    assert!(state.fork.navigate_agent.is_none());
+}
+
+#[test]
 fn agent_selection_wraps_in_both_directions() {
     let mut state = agent_state();
     enter_agent_navigation(&mut state);

@@ -67,6 +67,7 @@ use crate::server::pane_input::{
     apply_client_pane_input_events, apply_client_popup_input_events, apply_terminal_attach_input,
     apply_terminal_attach_scroll, terminal_attach_mouse_position,
 };
+use crate::server::shutdown::{ServerStop, ShutdownReason};
 use crate::server::socket_paths::{
     client_socket_path, prepare_socket_path, restrict_socket_permissions,
 };
@@ -81,6 +82,11 @@ mod notifications;
 mod render;
 mod retained_surface;
 mod surface_interest;
+
+// Producers can refill even a bounded channel while it is being drained.
+// Yield to scheduled work and rendering between batches; select! below
+// immediately wakes for any messages left in either external queue.
+const EXTERNAL_EVENT_DRAIN_LIMIT: usize = 64;
 
 pub use bootstrap::run_server;
 use lifecycle::wait_for_live_handoff_response_write;
@@ -235,8 +241,9 @@ pub struct HeadlessServer {
     /// Imported panes get one app-safe resize nudge after the first client attaches.
     #[cfg(unix)]
     pending_handoff_repaint_nudge: bool,
-    /// Flag set by Ctrl+C or `server stop` signal.
+    /// Flag set by a stop signal or `server stop`; shares `server_stop`'s flag.
     should_quit: Arc<AtomicBool>,
+    server_stop: ServerStop,
     host_shutdown_requested: Arc<AtomicBool>,
     /// Channel for receiving server events from client connection threads.
     server_event_rx: mpsc::Receiver<ServerEvent>,
@@ -249,8 +256,8 @@ fn spawn_windows_client_accept_thread(
     listener: LocalListener,
     should_quit: Arc<AtomicBool>,
     server_event_tx: mpsc::Sender<ServerEvent>,
-) {
-    std::thread::spawn(move || {
+) -> io::Result<std::thread::JoinHandle<()>> {
+    crate::thread_spawn::spawn_named("herdr-client-accept", move || {
         let mut next_client_id = 1_u64;
         while !should_quit.load(Ordering::Acquire) {
             let stream = match listener.accept() {
@@ -275,7 +282,7 @@ fn spawn_windows_client_accept_thread(
 
             let should_quit = should_quit.clone();
             let server_event_tx = server_event_tx.clone();
-            std::thread::spawn(move || {
+            let spawned = crate::thread_spawn::spawn_named("herdr-client-conn", move || {
                 if let Err(err) = crate::server::client_transport::handle_client_handshake(
                     stream,
                     client_id,
@@ -285,8 +292,11 @@ fn spawn_windows_client_accept_thread(
                     debug!(client_id, err = %err, "client handshake failed");
                 }
             });
+            if let Err(err) = spawned {
+                warn!(client_id, err = %err, "failed to spawn client connection thread; dropping connection");
+            }
         }
-    });
+    })
 }
 
 impl HeadlessServer {
@@ -301,8 +311,9 @@ impl HeadlessServer {
         config_diagnostics: &[String],
         api_tx: Option<api::ApiRequestSender>,
         api_server: Option<api::ServerHandle>,
-        should_quit: Arc<AtomicBool>,
+        server_stop: ServerStop,
     ) -> io::Result<Self> {
+        let should_quit = server_stop.flag().clone();
         let client_path = client_socket_path();
         prepare_socket_path(&client_path)?;
 
@@ -318,7 +329,7 @@ impl HeadlessServer {
         // Channel for server events from client threads.
         let (server_event_tx, server_event_rx) = mpsc::channel(64);
         #[cfg(windows)]
-        spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone());
+        spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone())?;
 
         let server_keybindings = app_keybindings(&app);
         let headless_size = app.state.headless_size;
@@ -367,6 +378,7 @@ impl HeadlessServer {
             #[cfg(unix)]
             pending_handoff_repaint_nudge: false,
             should_quit,
+            server_stop,
             server_event_rx,
             server_event_tx,
         })
@@ -384,10 +396,12 @@ impl HeadlessServer {
     pub async fn run(&mut self) -> io::Result<()> {
         crate::logging::startup("server");
 
-        // Register SIGINT handler for graceful shutdown.
-        let should_quit = self.should_quit.clone();
+        let server_stop = self.server_stop.clone();
         let quit_notify = self.server_event_tx.clone();
-        ctrlc_handler(should_quit, quit_notify);
+        crate::platform::spawn_server_signal_monitor(move |signal| {
+            server_stop.request(ShutdownReason::Signal(signal));
+            let _ = quit_notify.try_send(ServerEvent::QuitSignal);
+        });
         let quit_notify = self.server_event_tx.clone();
         let _host_shutdown = crate::platform::HostShutdownMonitor::start(
             self.host_shutdown_requested.clone(),
@@ -579,7 +593,7 @@ impl HeadlessServer {
                 .next_headless_loop_deadline_with_git_refresh(
                     now,
                     needs_render,
-                    self.has_app_client(),
+                    self.git_refresh_scheduled(),
                 )
                 .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
                 .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
@@ -890,6 +904,12 @@ impl HeadlessServer {
         self.app_client_count() > 0
     }
 
+    /// Periodic Git refresh follows attached clients. A refresh whose worker
+    /// failed to start still retries without one, so restored metadata settles.
+    fn git_refresh_scheduled(&self) -> bool {
+        self.has_app_client() || self.app.git_refresh_spawn_retry_pending
+    }
+
     fn remove_client(&mut self, client_id: u64) -> bool {
         self.disconnect_native_graphics(client_id);
         let disconnected_focus = self
@@ -1011,7 +1031,10 @@ impl HeadlessServer {
     /// Drains server events from the dedicated channel.
     fn drain_server_events(&mut self) -> bool {
         let mut changed = false;
-        while !self.should_quit.load(Ordering::Acquire) {
+        for _ in 0..EXTERNAL_EVENT_DRAIN_LIMIT {
+            if self.should_quit.load(Ordering::Acquire) {
+                break;
+            }
             let Ok(ev) = self.server_event_rx.try_recv() else {
                 break;
             };
@@ -1853,6 +1876,7 @@ impl HeadlessServer {
                 surface_active,
                 surface_reuse,
                 surface_delta,
+                surface_scroll,
                 writer,
             } => {
                 if self.handoff_in_progress {
@@ -1900,6 +1924,9 @@ impl HeadlessServer {
                 connection.shell_surface_active = surface_active;
                 connection.render_state.enable_surface_reuse(surface_reuse);
                 connection.render_state.enable_surface_delta(surface_delta);
+                connection
+                    .render_state
+                    .enable_surface_scroll(surface_scroll);
                 connection.shell_projection_revision = 1;
                 let config_diagnostic = if endpoint_keybindings {
                     self.server_config_diagnostic.as_deref()
@@ -2788,7 +2815,10 @@ impl HeadlessServer {
     /// During shutdown, remaining requests get a `server_unavailable` error.
     fn drain_api_requests_with_shutdown_check(&mut self) -> bool {
         let mut changed = false;
-        while !self.should_quit.load(Ordering::Acquire) {
+        for _ in 0..EXTERNAL_EVENT_DRAIN_LIMIT {
+            if self.should_quit.load(Ordering::Acquire) {
+                break;
+            }
             let Ok(msg) = self.app.api_rx.try_recv() else {
                 break;
             };
@@ -3224,7 +3254,15 @@ impl HeadlessServer {
             }
         }
 
-        if self.has_app_client() {
+        if self
+            .app
+            .restored_worktree_validation_retry_at
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.app.start_restored_worktree_validation(now);
+        }
+
+        if self.git_refresh_scheduled() {
             self.app.start_git_status_refresh_if_due(now);
         }
 
@@ -3309,16 +3347,6 @@ impl Drop for HeadlessServer {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Installs a Ctrl+C handler that sets the should_quit flag and wakes up
-/// the event loop by sending a QuitSignal on the server event channel.
-fn ctrlc_handler(should_quit: Arc<AtomicBool>, server_event_tx: mpsc::Sender<ServerEvent>) {
-    let _ = ctrlc::set_handler(move || {
-        should_quit.store(true, Ordering::Release);
-        // Wake up the event loop so the quit flag is checked promptly.
-        let _ = server_event_tx.try_send(ServerEvent::QuitSignal);
-    });
-}
 
 /// Sleep until a deadline, or return pending if none.
 async fn sleep_until_or_pending(deadline: Option<Instant>) {
