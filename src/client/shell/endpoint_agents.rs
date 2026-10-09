@@ -84,6 +84,7 @@ pub(super) fn render_expanded(
             hits.endpoint_agents
                 .push((rect, row.endpoint_id.clone(), row.agent.pane_id.clone()));
         },
+        |row| super::agent_groups::endpoint_machine(endpoints, &row.endpoint_id),
         |row| super::agent_groups::endpoint_group(endpoints, &row.endpoint_id, &row.agent.pane_id),
         |row| super::agent_groups::endpoint_rank(endpoints, &row.endpoint_id, &row.agent.pane_id),
     );
