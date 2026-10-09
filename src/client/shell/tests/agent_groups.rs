@@ -319,3 +319,48 @@ fn several_machines_nest_space_headers_under_a_machine_header() {
         .collect::<Vec<_>>();
     assert_eq!(agent_rects, [(2, 2), (2, 4), (2, 8), (2, 10)]);
 }
+
+#[test]
+fn linked_worktree_spaces_nest_under_their_repository_header() {
+    let mut snap = two_spaces();
+    snap.workspaces[1].worktree = Some(ClientShellWorktree {
+        key: "/src/herdr".into(),
+        label: "herdr".into(),
+        is_linked_worktree: true,
+    });
+    let config: Config =
+        toml::from_str("[ui.sidebar.agents]\ngroup_by_space = true\nrows = [[\"state_text\"]]\n")
+            .expect("config");
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    let lines = body_lines(&mut state);
+    assert_eq!(
+        &lines[..6],
+        ["client-shell", "idle", "", "herdr", "second", "idle"],
+        "{lines:?}"
+    );
+    let body = state.hits.agent_body;
+    let agent_rects = state
+        .hits
+        .agents
+        .iter()
+        .map(|(rect, pane_id)| (rect.x - body.x, rect.y - body.y, pane_id.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(agent_rects, [(0, 1, "pane_1"), (2, 5, "pane_2")]);
+}
+
+#[test]
+fn slim_rows_drop_the_status_text_and_agent_lines() {
+    let mut state = state_with(
+        r#"
+[ui.sidebar.agents]
+slim = true
+rows = [["state_icon", "workspace"], ["state_text", "agent"]]
+"#,
+    );
+    let lines = body_lines(&mut state);
+    assert!(lines[0].ends_with("client-shell"), "{lines:?}");
+    assert!(lines[1].ends_with("second"), "{lines:?}");
+    assert_eq!(lines[2], "", "{lines:?}");
+}
