@@ -1094,7 +1094,7 @@
           "key": "ui.sidebar.agents.group_by_space",
           "type": "bool",
           "default": "false",
-          "description": "Insert a header row with the space name above each space's agents. Applies to the \"spaces\" ordering only."
+          "description": "Insert a header row with the space name above each space's agents. With several machines, spaces nest under a machine header. Applies to the \"spaces\" ordering only."
         },
         {
           "key": "ui.sidebar.agents.rows",

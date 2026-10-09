@@ -2,15 +2,25 @@ use crate::client::shell::*;
 
 /// One entry of the agents panel list when grouping by space is enabled.
 pub(in crate::client::shell) enum AgentPanelItem<R> {
-    Header { label: String, leading_blank: bool },
-    Agent(R),
+    Header {
+        label: String,
+        leading_blank: bool,
+        indent: u16,
+    },
+    Agent {
+        row: R,
+        indent: u16,
+    },
 }
+
+/// Columns a space header and its agents shift right under a machine header.
+const MACHINE_INDENT: u16 = 2;
 
 impl<R> AgentPanelItem<R> {
     pub(in crate::client::shell) fn lines(&self, agent_lines: impl Fn(&R) -> usize) -> usize {
         match self {
             Self::Header { leading_blank, .. } => 1 + usize::from(*leading_blank),
-            Self::Agent(row) => agent_lines(row),
+            Self::Agent { row, .. } => agent_lines(row),
         }
     }
 }
@@ -23,16 +33,64 @@ pub(in crate::client::shell) fn grouping_enabled(config: &ClientShellConfig) -> 
 
 /// Folds agent rows into header + rows groups, in order of first appearance.
 /// `group_of` yields a stable key and the header label; rows without one are
-/// kept in place without a header.
+/// kept in place without a header. When `machine_of` yields a (key, label),
+/// space groups nest under one header per machine, machines in first-appearance
+/// order like the spaces panel.
 pub(in crate::client::shell) fn group_items<R>(
     rows: Vec<R>,
     config: &ClientShellConfig,
+    machine_of: impl Fn(&R) -> Option<(String, String)>,
     group_of: impl Fn(&R) -> Option<(String, String)>,
     rank_of: impl Fn(&R) -> AgentRank,
 ) -> Vec<AgentPanelItem<R>> {
     if !grouping_enabled(config) {
-        return rows.into_iter().map(AgentPanelItem::Agent).collect();
+        return rows
+            .into_iter()
+            .map(|row| AgentPanelItem::Agent { row, indent: 0 })
+            .collect();
     }
+    let mut machines: Vec<Option<(String, String)>> = Vec::new();
+    for machine in rows.iter().map(&machine_of) {
+        if !machines.contains(&machine) {
+            machines.push(machine);
+        }
+    }
+    if machines.iter().all(Option::is_none) {
+        return space_items(rows, group_of, rank_of, 0);
+    }
+    let mut buckets: Vec<Vec<R>> = machines.iter().map(|_| Vec::new()).collect();
+    for row in rows {
+        let machine = machine_of(&row);
+        if let Some(index) = machines.iter().position(|m| *m == machine) {
+            buckets[index].push(row);
+        }
+    }
+    let mut items = Vec::new();
+    for (index, (machine, rows)) in machines.into_iter().zip(buckets).enumerate() {
+        let indent = match machine {
+            Some((_, label)) => {
+                items.push(AgentPanelItem::Header {
+                    label,
+                    leading_blank: index > 0,
+                    indent: 0,
+                });
+                MACHINE_INDENT
+            }
+            None => 0,
+        };
+        items.extend(space_items(rows, &group_of, &rank_of, indent));
+    }
+    items
+}
+
+/// Space groups of one machine (or of the whole panel). Without a machine
+/// header, spaces are separated by a blank line; under one they stack tightly.
+fn space_items<R>(
+    rows: Vec<R>,
+    group_of: impl Fn(&R) -> Option<(String, String)>,
+    rank_of: impl Fn(&R) -> AgentRank,
+    indent: u16,
+) -> Vec<AgentPanelItem<R>> {
     let mut groups: Vec<(Option<String>, String, Vec<R>)> = Vec::new();
     for row in rows {
         let (key, label) = match group_of(&row) {
@@ -58,17 +116,21 @@ pub(in crate::client::shell) fn group_items<R>(
         if key.is_some() {
             items.push(AgentPanelItem::Header {
                 label,
-                leading_blank: index > 0,
+                leading_blank: indent == 0 && index > 0,
+                indent,
             });
         }
-        items.extend(rows.into_iter().map(AgentPanelItem::Agent));
+        items.extend(
+            rows.into_iter()
+                .map(|row| AgentPanelItem::Agent { row, indent }),
+        );
     }
     items
 }
 
 /// `render_agent_list` with space headers when grouping is enabled. Rows are
 /// grouped by reference, so rendering does not clone them.
-#[allow(clippy::too_many_arguments)] // Mirrors render_agent_list plus the two grouping keys.
+#[allow(clippy::too_many_arguments)] // Mirrors render_agent_list plus the three grouping keys.
 pub(in crate::client::shell) fn render_grouped_agent_list<T>(
     buffer: &mut Buffer,
     area: Rect,
@@ -79,12 +141,14 @@ pub(in crate::client::shell) fn render_grouped_agent_list<T>(
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
+    machine_of: impl Fn(&T) -> Option<(String, String)>,
     group_of: impl Fn(&T) -> Option<(String, String)>,
     rank_of: impl Fn(&T) -> AgentRank,
 ) {
     let items = group_items(
         rows.iter().collect(),
         config,
+        |row| machine_of(row),
         |row| group_of(row),
         |row| rank_of(row),
     );
@@ -101,10 +165,29 @@ pub(in crate::client::shell) fn render_grouped_agent_list<T>(
             AgentPanelItem::Header {
                 label,
                 leading_blank,
-            } => render_group_header(buffer, rect, label, *leading_blank, config),
-            AgentPanelItem::Agent(row) => render_row(buffer, rect, row, hits),
+                indent,
+            } => render_group_header(
+                buffer,
+                indented(rect, *indent),
+                label,
+                *leading_blank,
+                config,
+            ),
+            AgentPanelItem::Agent { row, indent } => {
+                render_row(buffer, indented(rect, *indent), row, hits)
+            }
         },
     );
+}
+
+fn indented(rect: Rect, indent: u16) -> Rect {
+    let indent = indent.min(rect.width);
+    Rect::new(
+        rect.x.saturating_add(indent),
+        rect.y,
+        rect.width - indent,
+        rect.height,
+    )
 }
 
 /// Priority-mode ranking: status urgency first, then most recent state change.
@@ -221,8 +304,22 @@ pub(in crate::client::shell) fn finish_rows(
     }
 }
 
-/// Group key/label for an agent of one machine: the space, prefixed with the
-/// machine label when several machines are shown.
+/// Machine (key, label) of an agent when several machines are shown, so space
+/// groups nest under a machine header; `None` with a single machine.
+pub(in crate::client::shell) fn endpoint_machine(
+    endpoints: &[ClientShellEndpoint],
+    endpoint_id: &ClientEndpointId,
+) -> Option<(String, String)> {
+    if endpoints.len() < 2 {
+        return None;
+    }
+    let endpoint = endpoints
+        .iter()
+        .find(|endpoint| &endpoint.endpoint_id == endpoint_id)?;
+    Some((format!("{endpoint_id:?}"), endpoint.label.clone()))
+}
+
+/// Group key/label for an agent of one machine: its space.
 pub(in crate::client::shell) fn endpoint_group(
     endpoints: &[ClientShellEndpoint],
     endpoint_id: &ClientEndpointId,
@@ -232,13 +329,7 @@ pub(in crate::client::shell) fn endpoint_group(
         .iter()
         .find(|endpoint| &endpoint.endpoint_id == endpoint_id)?;
     let (workspace_id, label) = workspace_group(endpoint.snapshot.as_deref()?, pane_id)?;
-    let key = format!("{endpoint_id:?}/{workspace_id}");
-    let label = if endpoints.len() > 1 {
-        format!("{} · {label}", endpoint.label)
-    } else {
-        label
-    };
-    Some((key, label))
+    Some((format!("{endpoint_id:?}/{workspace_id}"), label))
 }
 
 pub(in crate::client::shell) fn endpoint_rank(
@@ -258,7 +349,7 @@ fn agents_only<R>(items: Vec<AgentPanelItem<R>>) -> Vec<R> {
     items
         .into_iter()
         .filter_map(|item| match item {
-            AgentPanelItem::Agent(row) => Some(row),
+            AgentPanelItem::Agent { row, .. } => Some(row),
             AgentPanelItem::Header { .. } => None,
         })
         .collect()
@@ -276,6 +367,7 @@ pub(in crate::client::shell) fn displayed_agent_pane_ids(
     agents_only(group_items(
         ids,
         config,
+        |_| None,
         |pane_id| workspace_group(snapshot, pane_id),
         |pane_id| agent_rank(snapshot, pane_id),
     ))
@@ -295,6 +387,7 @@ pub(in crate::client::shell) fn displayed_agent_targets(
     agents_only(group_items(
         targets,
         config,
+        |target| endpoint_machine(endpoints, &target.endpoint_id),
         |target| endpoint_group(endpoints, &target.endpoint_id, &target.pane_id),
         |target| endpoint_rank(endpoints, &target.endpoint_id, &target.pane_id),
     ))

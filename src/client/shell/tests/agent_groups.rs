@@ -270,3 +270,52 @@ fn previous_agent_follows_the_grouped_display_order() {
         previous.actions
     );
 }
+
+#[test]
+fn several_machines_nest_space_headers_under_a_machine_header() {
+    use crate::client::endpoint::{
+        ClientEndpointId, ClientEndpointStatus, ProfileId, SavedSshEndpoint,
+    };
+    let mut state =
+        state_with("[ui.sidebar.agents]\ngroup_by_space = true\nrows = [[\"state_text\"]]\n");
+    let profile = SavedSshEndpoint {
+        id: ProfileId::parse("0123456789abcdef0123456789abcdef").expect("profile id"),
+        label: "Build".into(),
+        target: "dev@build.example".into(),
+        session: "agents".into(),
+        enabled: true,
+    };
+    let remote = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&remote, ClientEndpointStatus::Online);
+    let mut remote_snapshot = two_spaces();
+    remote_snapshot.boot_id = "remote-boot".into();
+    state.set_endpoint_snapshot(&remote, Box::new(remote_snapshot));
+
+    let lines = body_lines(&mut state);
+    assert_eq!(
+        &lines[..11],
+        [
+            "Local",
+            "client-shell",
+            "idle",
+            "second",
+            "idle",
+            "",
+            "Build",
+            "client-shell",
+            "idle",
+            "second",
+            "idle",
+        ],
+        "{lines:?}"
+    );
+    let body = state.hits.agent_body;
+    let agent_rects = state
+        .hits
+        .endpoint_agents
+        .iter()
+        .map(|(rect, _, _)| (rect.x - body.x, rect.y - body.y))
+        .collect::<Vec<_>>();
+    assert_eq!(agent_rects, [(2, 2), (2, 4), (2, 8), (2, 10)]);
+}

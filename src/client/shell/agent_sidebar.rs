@@ -84,6 +84,7 @@ pub(super) fn render_agent_panel(
             hits.agents.push((rect, row.pane_id.clone()));
             render_agent_row(buffer, rect, row, config);
         },
+        |_| None,
         |row| super::agent_groups::workspace_group(snapshot, &row.pane_id),
         |row| super::agent_groups::agent_rank(snapshot, &row.pane_id),
     );
