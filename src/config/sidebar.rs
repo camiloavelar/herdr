@@ -429,6 +429,8 @@ pub struct AgentsSidebarConfig {
     pub row_gap: u16,
     /// Insert a header row per space above its agents (spaces ordering only).
     pub group_by_space: bool,
+    /// Drop the state_text and agent tokens so rows stay short.
+    pub slim: bool,
 }
 
 impl AgentsSidebarConfig {
@@ -454,6 +456,7 @@ impl Default for AgentsSidebarConfig {
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
             group_by_space: false,
+            slim: false,
         }
     }
 }
